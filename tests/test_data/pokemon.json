@@ -1,0 +1,86 @@
+{
+    "测试精灵": {
+        "base_stats": {
+            "hp": 100,
+            "attack": 100,
+            "defense": 100,
+            "special_attack": 100,
+            "special_defense": 100,
+            "speed": 100,
+            "crit_points": 20
+        },
+        "types": ["水"],
+        "default_moves": ["臭鸡蛋", "水波术", "魔法增效", "金属噪音"],
+        "extra_moves": ["速度打击", "星之雨", "护盾术", "光合作用", "猛烈撞击" ,"冥暗诅咒"]
+    },
+    "测试精灵2": {
+        "base_stats": {
+            "hp": 110,
+            "attack": 110,
+            "defense": 110,
+            "special_attack": 110,
+            "special_defense": 110,
+            "speed": 90,
+            "crit_points": 20
+        },
+        "types": ["火"],
+        "default_moves": ["冥暗诅咒", "巨焰吞噬", "魔法增效", "臭鸡蛋"],
+        "extra_moves": ["速度打击", "星之雨", "护盾术", "猛烈撞击", "金属噪音"]
+    },
+    "测试精灵3": {
+        "base_stats": {
+            "hp": 90,
+            "attack": 90,
+            "defense": 90,
+            "special_attack": 90,
+            "special_defense": 90,
+            "speed": 110,
+            "crit_points": 20
+        },
+        "types": ["草"],
+        "default_moves": ["测试连击1", "破土之力", "测试连击2", "金属噪音"],
+        "extra_moves": ["速度打击", "星之雨", "护盾术", "愤怒斩", "破土之力", "魔法增效"]
+    },
+    "测试精灵4": {
+        "base_stats": {
+            "hp": 110,
+            "attack": 110,
+            "defense": 110,
+            "special_attack": 110,
+            "special_defense": 110,
+            "speed": 110,
+            "crit_points": 20
+        },
+        "types": ["一般"],
+        "default_moves": ["速度打击", "龙之连舞", "星之雨", "护盾术"],
+        "extra_moves": ["猛烈撞击", "流沙古墓", "龙威" ]
+    },    
+	"初始精灵-test": {
+        "base_stats": {
+            "hp": 110,
+            "attack": 110,
+            "defense": 110,
+            "special_attack": 110,
+            "special_defense": 180,
+            "speed": 110,
+            "crit_points": 20
+        },
+        "types": ["一般"],
+        "default_moves": ["速度打击", "魔法增效", "星之雨", "护盾术"],
+        "extra_moves": ["猛烈撞击", "流沙古墓", "龙威" ]
+    },    
+	"替换精灵-test": {
+        "base_stats": {
+            "hp": 110,
+            "attack": 110,
+            "defense": 110,
+            "special_attack": 110,
+            "special_defense": 110,
+            "speed": 110,
+            "crit_points": 20
+        },
+        "types": ["一般"],
+        "default_moves": ["速度打击", "冥暗诅咒", "星之雨", "护盾术"],
+        "extra_moves": ["猛烈撞击", "流沙古墓", "龙威" ]
+    }
+}

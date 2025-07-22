@@ -1,0 +1,70 @@
+{
+    "npc_1_name": {
+        "title": "NPC 宝可梦 1 (首发) 名称",
+        "type": "string",
+        "default": "测试精灵",
+        "description": "填写第一只宝可梦的名称。如果留空，则该位置及后续位置的宝可梦都不会被创建。"
+    },
+    "npc_1_moves": {
+        "title": "NPC 宝可梦 1 (首发) 技能",
+        "type": "list",
+        "items": { "type": "string" },
+        "default": ["水波术", "速度打击", "护盾术", "金属噪音"],
+        "description": "为第一只宝可梦配置技能。如果留空，将使用它在 pokemon.json 中的默认技能。"
+    },
+    "npc_2_name": {
+        "title": "NPC 宝可梦 2 名称",
+        "type": "string",
+        "default": "测试精灵2"
+    },
+    "npc_2_moves": {
+        "title": "NPC 宝可梦 2 技能",
+        "type": "list",
+        "items": { "type": "string" },
+        "default": []
+    },
+    "npc_3_name": {
+        "title": "NPC 宝可梦 3 名称",
+        "type": "string",
+        "default": "测试精灵3"
+    },
+    "npc_3_moves": {
+        "title": "NPC 宝可梦 3 技能",
+        "type": "list",
+        "items": { "type": "string" },
+        "default": ["测试连击1", "测试连击2"]
+    },
+    "npc_4_name": {
+        "title": "NPC 宝可梦 4 名称",
+        "type": "string",
+        "default": ""
+    },
+    "npc_4_moves": {
+        "title": "NPC 宝可梦 4 技能",
+        "type": "list",
+        "items": { "type": "string" },
+        "default": []
+    },
+    "npc_5_name": {
+        "title": "NPC 宝可梦 5 名称",
+        "type": "string",
+        "default": ""
+    },
+    "npc_5_moves": {
+        "title": "NPC 宝可梦 5 技能",
+        "type": "list",
+        "items": { "type": "string" },
+        "default": []
+    },
+    "npc_6_name": {
+        "title": "NPC 宝可梦 6 名称",
+        "type": "string",
+        "default": ""
+    },
+    "npc_6_moves": {
+        "title": "NPC 宝可梦 6 技能",
+        "type": "list",
+        "items": { "type": "string" },
+        "default": []
+    }
+}
