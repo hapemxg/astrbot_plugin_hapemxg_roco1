@@ -1,0 +1,386 @@
+{
+    "猛烈撞击": {
+        "display": {
+            "power": 40, "pp": 35, "type": "一般", "category": "physical", "description": "猛烈撞击对手，造成物理伤害。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 100,
+            "effects": [
+                { "handler": "deal_damage", "options": {"power": 40, "type": "一般", "category": "physical"} }
+            ]
+        }
+    },
+    "水波术": {
+        "display": {
+            "power": 120, "pp": 5, "type": "水", "category": "special", "description": "高压水柱攻击对手，威力巨大。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 80,
+            "effects": [
+                { "handler": "deal_damage", "options": {"power": 120, "type": "水", "category": "special"} }
+            ]
+        }
+    },
+    "巨焰吞噬": {
+        "display": {
+            "power": 110, "pp": 5, "type": "火", "category": "special", "description": "喷射烈焰吞噬敌人，造成特殊伤害。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 100,
+            "effects": [
+                { "handler": "deal_damage", "options": {"power": 110, "type": "火", "category": "special"} }
+            ]
+        }
+    },
+    "破土之力": {
+        "display": {
+            "power": 110, "pp": 5, "type": "草", "category": "special", "description": "召唤大地之力攻击敌人，造成特殊伤害。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 100,
+            "effects": [
+                { "handler": "deal_damage", "options": {"power": 110, "type": "草", "category": "special"} }
+            ]
+        }
+    },
+    "魔法增效": {
+        "display": {
+            "power": 0, "pp": 40, "type": "一般", "category": "status", "description": "提升自身特殊攻击力。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 100,
+            "effects": [
+                {
+                    "handler": "stat_change",
+                    "target": "self",
+                    "changes": [{"stat": "special_attack", "change": 1}]
+                }
+            ]
+        }
+    },
+    "金属噪音": {
+        "display": {
+            "power": 0, "pp": 40, "type": "一般", "category": "status", "description": "发出刺耳噪音，大幅降低对手特殊防御。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 100,
+            "effects": [
+                {
+                    "handler": "stat_change",
+                    "target": "opponent",
+                    "changes": [{"stat": "special_defense", "change": -4}]
+                }
+            ]
+        }
+    },
+    "速度打击": {
+        "display": {
+            "power": 90, "pp": 5, "type": "一般", "category": "physical", "description": "高速突袭，优先攻击。"
+        },
+        "on_use": {
+            "priority": 9, "accuracy": 100,
+            "effects": [
+                { "handler": "deal_damage", "options": {"power": 90, "type": "一般", "category": "physical"} }
+            ]
+        }
+    },
+    "星之雨": {
+        "display": {
+            "power": 60, "pp": 20, "type": "一般", "category": "special", "description": "召唤星辰打击对手，必中。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 100, "guaranteed_hit": true,
+            "effects": [
+                { "handler": "deal_damage", "options": {"power": 60, "type": "一般", "category": "special", "guaranteed_hit": true} }
+            ]
+        }
+    },
+    "愤怒斩": {
+        "display": {
+            "power": 90, "pp": 15, "type": "草", "category": "physical", "description": "愤怒挥斩，提升自身暴击率。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 100,
+            "effects": [
+                { "handler": "deal_damage", "options": {"power": 90, "type": "草", "category": "physical"} },
+                { 
+                  "handler": "stat_change",
+                  "target": "self",
+                  "changes": [{"stat": "crit_rate", "change": 2}]
+                }
+            ]
+        }
+    },
+    "泥浆喷射": {
+        "display": {
+            "power": 55, "pp": 15, "type": "水", "category": "special", "description": "喷射泥浆，有机会降低对手速度。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 95,
+            "effects": [
+                { "handler": "deal_damage", "options": {"power": 55, "type": "水", "category": "special"} },
+                {
+                    "handler": "stat_change",
+                    "target": "opponent",
+                    "chance": 30,
+                    "changes": [{"stat": "speed", "change": -1}]
+                }
+            ]
+        }
+    },
+    "护盾术": {
+        "display": {
+            "power": 0, 
+            "pp": 10, 
+            "type": "一般", 
+            "category": "status", 
+            "description": "闪避后手攻击，连续使用概率降低。"
+		},
+        "on_use": {
+            "priority": 11,
+            "effects": [
+                {
+                    "handler": "apply_status",
+                    "target": "self",
+                    "status": "evasion_shield",
+                    "consecutive_use_penalty": {
+                        "move_name": "护盾术",
+                        "reduction_per_use": 20.0 
+                    }
+                }
+            ]
+        }
+    },
+    "光合作用": {
+        "display": {
+            "power": 0, "pp": 5, "type": "草", "category": "status", "description": "利用光合作用回复自身体力。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 100, "guaranteed_hit": true,
+            "effects": [
+                {
+                    "handler": "restore_health",
+                    "target": "self",
+                    "percentage": 50
+                }
+            ]
+        }
+    },
+    "冥暗诅咒": {
+        "display": {
+            "power": 110, "pp": 5, "type": "一般", "category": "special", "description": "强大诅咒，造成伤害并使对手陷入诅咒状态。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 100,
+            "effects": [
+                { "handler": "deal_damage", "options": {"power": 110, "type": "一般", "category": "special"} },
+                {
+                    "handler": "apply_status",
+                    "status": "curse",
+                    "chance": 100
+                }
+            ]
+        }
+    },
+    "臭鸡蛋": {
+        "display": {
+            "power": 0, "pp": 40, "type": "一般", "category": "status", "description": "投掷臭鸡蛋，使对手中毒。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 100,
+            "effects": [
+                {
+                    "handler": "apply_status",
+                    "status": "poison",
+                    "chance": 100
+                }
+            ]
+        }
+    },
+    "龙之连舞": {
+        "display": {
+            "power": 80,
+            "pp": 5,
+            "type": "龙",
+            "category": "physical",
+            "description": "发动龙之舞，在后续攻击中追加不同效果的强力连击。"
+        },
+        "on_use": {
+            "priority": 8,
+            "accuracy": 100,
+            "effects": [
+                {
+                    "handler": "start_sequence",
+                    "sequence_id": "DragonDanceChain",
+                    "initial_charges": 2
+                },
+                { 
+                    "handler": "deal_damage",
+                    "options": {"power": 50, "type": "一般", "category": "physical"}
+                }
+            ]
+        },
+        "on_follow_up": {
+            "DragonDanceChain": [
+                [
+                    { "handler": "apply_status", "target": "opponent", "status": "poison" },
+                    { "handler": "stat_change", "target": "opponent", "changes": [{"stat": "defense", "change": -1}] },
+                    { "handler": "deal_damage", "options": {"power": 60, "type": "一般", "category": "physical"} }
+                ],
+                [
+                    { "handler": "deal_damage", "options": {"power": 70, "type": "一般", "category": "physical", "guaranteed_hit": true} },
+                    { "handler": "apply_temporary_flag", "flag_name": "guaranteed_evasion" }
+                ]
+            ]
+        }
+    },
+    "测试连击1": {
+        "display": {
+            "power": 100,
+            "pp": 10,
+            "type": "一般",
+            "category": "physical",
+            "description": "连续三回合发动攻击，威力会逐回合提升。"
+        },
+        "on_use": {
+            "priority": 8,
+            "accuracy": 100,
+            "effects": [
+                {
+                    "handler": "start_sequence",
+                    "sequence_id": "TestCombo1",
+                    "initial_charges": 2
+                },
+                { 
+                    "handler": "deal_damage",
+                    "options": {
+                        "power": 10, 
+                        "type": "一般", 
+                        "category": "physical"
+                    }
+                }
+            ]
+        },
+        "on_follow_up": {
+            "TestCombo1": [
+                [
+                    { 
+                        "handler": "deal_damage", 
+                        "options": {
+                            "power": 20, 
+                            "type": "一般", 
+                            "category": "physical"
+                        } 
+                    }
+                ],
+                [
+                    { 
+                        "handler": "deal_damage", 
+                        "options": {
+                            "power": 30, 
+                            "type": "一般", 
+                            "category": "physical"
+                        } 
+                    }
+                ]
+            ]
+        }
+    },
+	
+    "测试连击2": {
+        "display": {
+            "power": 100,
+            "pp": 10,
+            "type": "一般",
+            "category": "special",
+            "description": "连续三回合发动魔法攻击，威力会逐回合提升。"
+        },
+        "on_use": {
+            "priority": 8,
+            "accuracy": 100,
+            "effects": [
+                {
+                    "handler": "start_sequence",
+                    "sequence_id": "TestCombo2",
+                    "initial_charges": 2
+                },
+                { 
+                    "handler": "deal_damage",
+                    "options": {
+                        "power": 10, 
+                        "type": "一般", 
+                        "category": "special"
+                    }
+                }
+            ]
+        },
+        "on_follow_up": {
+            "TestCombo2": [
+                [
+                    { 
+                        "handler": "deal_damage", 
+                        "options": {
+                            "power": 20, 
+                            "type": "一般", 
+                            "category": "special"
+                        } 
+                    }
+                ],
+                [
+                    { 
+                        "handler": "deal_damage", 
+                        "options": {
+                            "power": 30, 
+                            "type": "一般", 
+                            "category": "special"
+                        } 
+                    }
+                ]
+            ]
+        }
+    },
+    "流沙古墓": {
+        "display": {
+            "power": 0, "pp": 10, "type": "一般", "category": "status", 
+            "description": "用流沙将对手困住，使其在接下来的2回合内无法行动。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 100,
+            "effects": [
+                { 
+                    "handler": "apply_counter",
+                    "target": "opponent",
+                    "options": {
+                        "key": "immobilize_turns",
+                        "value": 2
+                    }
+                }
+            ]
+        }
+    },
+    "龙威": {
+        "display": {
+            "power": 0, "pp": 15, "type": "一般", "category": "status", 
+            "description": "用强大的龙威震慑对手，使其陷入恐惧。"
+        },
+        "on_use": {
+            "priority": 10, "accuracy": 100,
+            "effects": [
+                { 
+                    "handler": "apply_status",
+                    "target": "opponent",
+                    "status": "fear"
+                }
+            ]
+        }
+    },
+	    "挑衅": {
+        "display": {
+            "power": 0, "pp": 40, "type": "一般", "category": "status", "description": "挑衅对手，触发追击。"
+        },
+        "on_use": {
+            "priority": 8, "accuracy": 100,
+            "effects": []
+        }
+    }
+}
