@@ -27,7 +27,8 @@ class DisplayModel(BaseModel):
 
 class OnUseModel(BaseModel):
     """校验技能的 'on_use' 部分"""
-    priority: int = 0
+    # 【核心修改】将 priority 的默认值从 0 修改为 8
+    priority: int = 8 
     accuracy: Optional[int] = 100
     guaranteed_hit: bool = False
     effects: List[EffectModel] = Field(default_factory=list)

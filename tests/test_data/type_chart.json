@@ -1,0 +1,27 @@
+{
+    "水": {
+        "super_effective": ["火"],
+        "not_very_effective": ["草"],
+        "no_effect": []
+    },
+    "火": {
+        "super_effective": ["草"],
+        "not_very_effective": ["水"],
+        "no_effect": []
+    },
+    "草": {
+        "super_effective": ["水"],
+        "not_very_effective": ["火", "草"],
+        "no_effect": []
+    },
+    "一般": {
+        "super_effective": [],
+        "not_very_effective": [],
+        "no_effect": ["幽灵"]
+    },
+    "幽灵": {
+        "super_effective": [],
+        "not_very_effective": [],
+        "no_effect": ["一般"]
+    }
+}

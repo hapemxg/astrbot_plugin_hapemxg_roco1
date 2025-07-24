@@ -1,0 +1,11 @@
+{
+    "poison":    {"name": "中毒", "category": "status", "status_type": "A", "is_volatile": false, "stacking_behavior": "ignore", "damage_per_turn": 0.125, "apply_log": "陷入了 [中毒] 状态！", "remove_log": "的 [中毒] 状态解除了。"},
+    "curse":     {"name": "诅咒", "category": "status", "status_type": "A", "is_volatile": true,  "stacking_behavior": "ignore", "damage_per_turn": 0.25, "apply_log": "被种下了 [诅咒]！", "remove_log": "的 [诅咒] 解除了。"},
+    "burn":      {"name": "灼伤", "category": "status", "status_type": "B", "is_volatile": false, "stacking_behavior": "ignore", "damage_per_turn": 0.0625, "stat_modifiers": {"attack": 0.5}, "apply_log": "陷入了 [灼伤] 状态！", "remove_log": "的 [灼伤] 治愈了。"},
+    "paralysis": {"name": "麻痹", "category": "status", "status_type": "B", "is_volatile": false, "stacking_behavior": "ignore", "stat_modifiers": {"speed": 0.5}, "immobility_chance": 0.25, "apply_log": "陷入了 [麻痹] 状态！", "remove_log": "的 [麻痹] 状态解除了。"},
+    "sleep":     {"name": "睡眠", "category": "status", "status_type": "B", "is_volatile": false, "stacking_behavior": "ignore", "max_duration": 3, "blocks_action": true, "apply_log": "睡着了！", "remove_log": "醒来了！"},
+    "freeze":    {"name": "冰冻", "category": "status", "status_type": "B", "is_volatile": false, "stacking_behavior": "ignore", "clear_chance": 0.2, "blocks_action": true, "apply_log": "被 [冰冻] 了！", "remove_log": "的冰块融化了！"},
+    "confusion": {"name": "混乱", "category": "status", "status_type": "B", "is_volatile": true,  "stacking_behavior": "ignore", "max_duration": 4, "self_hit_chance": 0.33, "apply_log": "陷入了 [混乱] 状态！", "remove_log": "恢复了正常！"},
+    "fear":      {"name": "恐惧", "category": "status", "status_type": "B", "is_volatile": true,  "stacking_behavior": "ignore", "on_apply_effects": [{"handler": "apply_status", "status": "flinch", "chance": 100}], "apply_log": "陷入了 [恐惧]！", "remove_log": "不再恐惧了。"},
+    "bind":      {"name": "束缚", "category": "status", "status_type": "C", "is_volatile": true,  "stacking_behavior": "ignore", "damage_per_turn": 0.125, "blocks_switch": true, "max_duration": 5, "apply_log": "被 [束缚] 住了！", "remove_log": "挣脱了束缚！"}
+}

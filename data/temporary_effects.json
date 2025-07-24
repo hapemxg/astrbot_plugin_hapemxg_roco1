@@ -1,0 +1,28 @@
+{
+    "flinch": {
+        "name": "畏缩",
+        "category": "volatile_flag",
+        "is_volatile": true,
+        "stacking_behavior": "refresh",
+        "blocks_action": true,
+        "apply_log": "畏缩了！"
+    },
+    "evasion_shield": {
+        "name": "闪避架势",
+        "category": "marker",
+        "is_volatile": true,
+        "stacking_behavior": "refresh",
+        "guaranteed_evasion": true,
+        "lifespan": "turn"
+    },
+    "immobilized": {
+        "name": "无法行动",
+        "category": "status",
+        "status_type": "immobilization",
+        "is_volatile": true,
+        "stacking_behavior": "ignore",
+        "blocks_action": true,
+        "duration": -1,
+        "description": "宝可梦无法采取主动行动。此效果在施加后的下一回合激活。"
+    }
+}
