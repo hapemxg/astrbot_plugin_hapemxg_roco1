@@ -1,176 +1,184 @@
-# battle_logic/pokemon.py
+# battle_logic/pokemon.py (拨乱反正版)
+from __future__ import annotations
 import math
-import random
 from typing import Dict, List, Optional, Tuple, Any, NamedTuple, TYPE_CHECKING
-from .move import Move
-from .constants import Stat, EFFECT_PROPERTIES, STAT_NAME_MAP
 
-if TYPE_CHECKING: from .factory import GameDataFactory
+from .move import Move
+from .constants import Stat, STAT_NAME_MAP
+from .aura import Aura, ComponentLifespan
+from .components import (
+    StatusEffectComponent, StatStageComponent, DamageComponent,
+    HealComponent, PPConsumptionComponent, VolatileFlagComponent
+)
+
+if TYPE_CHECKING:
+    from .factory import GameDataFactory
 
 class SkillSlot(NamedTuple):
     index: int
     move: Move
 
-class AppliedEffect:
-    """代表一个已施加在宝可梦身上的具体效果实例。"""
-    def __init__(self, effect_id: str, source_move: Optional[str] = None):
-        properties = EFFECT_PROPERTIES.get(effect_id)
-        # 如果是动态生成的序列ID，则动态获取属性
-        if not properties and effect_id.startswith("sequence_slot_"):
-            properties = {"category": "sequence"}
-
-        self.id = effect_id
-        self.name = properties.get('name', effect_id)
-        self.is_volatile = properties.get('is_volatile', False)
-        self.source_move = source_move
-        self.data: Dict[str, Any] = {}
-        
-        if properties and 'max_duration' in properties:
-            # 确保最小持续时间至少为1
-            min_duration = max(1, properties.get('min_duration', properties['max_duration'] - 2))
-            self.data['duration'] = random.randint(min_duration, properties['max_duration'])
-
 class Pokemon:
-    def __init__(self, name: str, level: int, types: List[str], stats: Dict[str, int], move_names: List[str], factory: 'GameDataFactory'):
-        self.name = name; self.level = level; self.types = types
-        self.crit_points = stats.get("crit_points", 0); self.base_stats = stats
+    def __init__(
+        self, name: str, level: int, types: List[str], stats: Dict[str, int],
+        move_names: List[str], factory: "GameDataFactory",
+    ):
+        self.name = name
+        self.level = level
+        self.types = types
+        self.crit_points = stats.get("crit_points", 0)
+        self.base_stats = stats
+        self.factory = factory
         self.stats = self._calculate_stats(self.base_stats, self.level)
-        self.max_hp = self.stats.get(Stat.HP, 1); self.current_hp = self.max_hp
-        self.skill_slots: List[SkillSlot] = []; self._initialize_moves(move_names, factory)
-        
-        self.effects: List[AppliedEffect] = []
-        self.stat_stages: Dict[Stat, int] = {stat: 0 for stat in Stat if stat != Stat.HP}
-        self.crit_rate_stage: int = 0
+        self.max_hp = self.stats.get(Stat.HP, 1)
+        self.skill_slots: List[SkillSlot] = []
+        self._initialize_moves(move_names, factory)
+        self.aura = Aura(self)
+        self.aura.add_component(HealComponent(self.max_hp))
 
-    def _calculate_stats(self, base_stats: Dict[str, int], level: int) -> Dict[Stat, int]:
-        IV, EV_TERM = 31, 0; final_stats = {}
-        final_stats[Stat.HP] = math.floor(((2 * base_stats.get("hp", 1) + IV + EV_TERM) * level) / 100) + level + 10
-        other_stats = {"attack": Stat.ATTACK, "defense": Stat.DEFENSE, "special_attack": Stat.SPECIAL_ATTACK, "special_defense": Stat.SPECIAL_DEFENSE, "speed": Stat.SPEED}
-        for key, stat in other_stats.items(): final_stats[stat] = math.floor((((2 * base_stats.get(key, 1) + IV + EV_TERM) * level) / 100) + 5)
-        return final_stats
-
-    def _initialize_moves(self, move_names: List[str], factory: 'GameDataFactory'):
-        from astrbot.api import logger; from copy import deepcopy
-        for i, name in enumerate(move_names):
-            template = factory.get_move_template(name)
-            if template: self.skill_slots.append(SkillSlot(index=i, move=deepcopy(template)))
-            else: logger.warning(f"未能为 {self.name} 加载技能 '{name}'。")
-
-    @property
-    def moves(self) -> Dict[str, Move]: return {s.move.name: s.move for s in self.skill_slots}
-    def is_fainted(self) -> bool: return self.current_hp <= 0
-    def take_damage(self, dmg: int): self.current_hp = max(0, self.current_hp - dmg)
-    def heal(self, amt: int): self.current_hp = min(self.max_hp, self.current_hp + amt)
-    def get_move_by_name(self, name: str) -> Optional[Move]: return next((s.move for s in self.skill_slots if s.move.name == name), None)
-    def use_move(self, name: str):
-        move = self.get_move_by_name(name)
-        if move and move.name != "挣扎" and move.current_pp is not None and move.current_pp > 0: move.current_pp -= 1
-    def has_usable_moves(self) -> bool:
-        return any(slot.move.current_pp is None or slot.move.current_pp > 0 for slot in self.skill_slots)
-
-    def has_effect(self, effect_id: str) -> bool:
-        return any(eff.id == effect_id for eff in self.effects)
-
-    def get_effect(self, effect_id: str) -> Optional[AppliedEffect]:
-        return next((eff for eff in self.effects if eff.id == effect_id), None)
-
-    def get_effects_by_category(self, category: str) -> List[AppliedEffect]:
-        """获取宝可梦身上所有属于指定类别的效果。"""
-        return [eff for eff in self.effects if self._get_effect_props(eff.id).get('category') == category]
-
-    def _get_effect_props(self, effect_id: str) -> Dict:
-        """内部辅助方法，用于动态获取序列效果的属性。"""
-        props = EFFECT_PROPERTIES.get(effect_id)
-        if not props and effect_id.startswith("sequence_slot_"):
-            return {"category": "sequence", "stacking_behavior": "refresh"}
-        return props or {}
-
-    def apply_effect(self, effect_id: str, source_move: Optional[str] = None, options: Optional[Dict] = None) -> Tuple[bool, str, Optional[List[Dict]]]:
-        """
-        【重构】施加效果，并返回是否成功、日志消息以及任何需要立即执行的衍生效果。
-        
-        Returns:
-            A tuple of (success, message, derivative_effects).
-        """
+    def apply_effect(
+        self, effect_id: str, source_move: Optional[str] = None, options: Optional[Dict] = None
+    ) -> Tuple[bool, str, Optional[List[Dict]]]:
+        """【最终修复版】施加状态效果，具有清晰的决策流程。"""
         new_props = self._get_effect_props(effect_id)
-        derivative_effects = None  # 初始化衍生效果列表
+        if not new_props: return False, f"未知效果: {effect_id}", None
+
+        # --- 1. 决策阶段：检查是否可以施加 ---
+        existing_effect_by_id = self.get_effect(effect_id)
+        stacking_behavior = new_props.get("stacking_behavior", "ignore")
+
+        if existing_effect_by_id and stacking_behavior == "ignore":
+            return False, f"已经处于 [{existing_effect_by_id.name}] 状态。", None
+
+        effect_to_replace_by_type: Optional[StatusEffectComponent] = None
+        new_status_type = new_props.get("status_type")
+        if new_status_type:
+            effect_to_replace_by_type = next((c for c in self.aura.get_components(StatusEffectComponent) if c.properties.get("status_type") == new_status_type), None)
+            # 如果存在同类型状态，且不是同一个效果（即不是刷新自己），则通常不允许叠加
+            if effect_to_replace_by_type and effect_to_replace_by_type.effect_id != effect_id:
+                pass # 允许替换
+            elif effect_to_replace_by_type and effect_to_replace_by_type.effect_id == effect_id and stacking_behavior != "refresh":
+                 # 存在同ID同TYPE的状态，但不是刷新模式，则按之前的ignore逻辑处理（理论上已被上面捕获）
+                 return False, f"已经处于 [{effect_to_replace_by_type.name}] 状态。", None
+
+        # --- 2. 执行阶段：清理旧状态 ---
+        log_parts = []
+        if existing_effect_by_id and stacking_behavior == "refresh":
+            self.remove_effect(effect_id) # 刷新自己
+
+        if effect_to_replace_by_type and effect_to_replace_by_type.effect_id != effect_id:
+            removal_log = self._remove_effect_and_log(effect_to_replace_by_type.effect_id)
+            if removal_log:
+                log_parts.append(removal_log)
+
+        # --- 3. 施加新效果 ---
+        lifespan = ComponentLifespan.PERMANENT
+        if new_props.get("is_volatile"): lifespan = ComponentLifespan.VOLATILE
+        elif new_props.get("is_temporary"): lifespan = ComponentLifespan.TEMPORARY
         
-        # --- 步骤1: 预处理和冲突检测 ---
-        existing_effect = self.get_effect(effect_id)
-        if existing_effect:
-            if new_props.get("stacking_behavior", "ignore") == "ignore":
-                return False, f"{self.name} 已经处于 [{existing_effect.name}] 状态。", None
+        new_component = StatusEffectComponent(effect_id, new_props, source_move=source_move, lifespan=lifespan)
+        if options: new_component.data.update(options)
+        self.aura.add_component(new_component)
+
+        # --- 4. 生成最终日志 ---
+        apply_log_template = new_props.get("apply_log", "获得了 [{name}] 效果！")
+        log_parts.append(apply_log_template.format(name=new_component.name))
         
-        effect_to_replace = None
-        if new_props.get('category') == 'status':
-            new_status_type = new_props.get('status_type')
-            if new_status_type:
-                for eff in self.effects:
-                    eff_props = self._get_effect_props(eff.id)
-                    if eff_props.get('status_type') == new_status_type:
-                        effect_to_replace = eff
-                        break
+        final_log = "\n  ".join(log_parts)
+        derivative_effects = new_props.get("on_apply_effects")
+        return True, final_log, derivative_effects
         
-        # --- 步骤2: 执行操作 (移除旧的，添加新的) ---
-        if existing_effect and new_props.get("stacking_behavior") == "refresh":
-            self.remove_effect(effect_id)
-        if effect_to_replace:
-            self.remove_effect(effect_to_replace.id)
-            
-        new_effect = AppliedEffect(effect_id, source_move)
-        if options: new_effect.data.update(options)
-        self.effects.append(new_effect)
-
-        # 【修复】检查并设置衍生效果
-        if new_props.get("on_apply_effects"):
-            derivative_effects = new_props["on_apply_effects"]
-
-        # --- 步骤3: 生成日志报告 ---
-        effect_name = new_props.get("name", effect_id)
-        if effect_to_replace:
-            return True, f"的 [{effect_name}] 效果替换了 [{effect_to_replace.name}]！", derivative_effects
-        elif new_props.get('category') == 'status':
-            return True, f"陷入了 [{effect_name}] 状态！", derivative_effects
-        else:
-            return True, f"获得了 [{effect_name}] 效果！", derivative_effects
-
-    def remove_effect(self, effect_id: str) -> bool:
-        initial_len = len(self.effects)
-        self.effects = [eff for eff in self.effects if eff.id != effect_id]
-        return len(self.effects) < initial_len
-
-    def on_switch_out(self):
-        self.effects = [effect for effect in self.effects if not effect.is_volatile]
-
-    def clear_turn_effects(self):
-        """清除所有生命周期为'turn'的效果，并移除序列效果的'is_activation_turn'标记。"""
-        self.effects = [eff for eff in self.effects if self._get_effect_props(eff.id).get('lifespan') != 'turn']
-        for eff in self.effects:
-            if eff.id.startswith("sequence_slot_") and "is_activation_turn" in eff.data:
-                del eff.data["is_activation_turn"]
-
+    # ... 其他所有方法保持不变，此处省略 ...
+    @property
+    def current_hp(self) -> int:
+        damage = sum(c.amount for c in self.aura.get_components(DamageComponent))
+        healed = sum(c.amount for c in self.aura.get_components(HealComponent))
+        return max(0, min(self.max_hp, healed - damage))
+    def is_fainted(self) -> bool:
+        return self.current_hp <= 0
+    def get_current_pp(self, move_name: str) -> Optional[int]:
+        move = self.get_move_by_name(move_name)
+        if move is None or move.max_pp is None: return None
+        spent = sum(c.amount for c in self.aura.get_components(PPConsumptionComponent) if c.move_name == move_name)
+        return move.max_pp - spent
     def get_modified_stat(self, stat: Stat) -> int:
         base = self.stats.get(stat, 1)
-        stage = self.stat_stages.get(stat, 0)
-        mult = (2 + abs(stage)) / 2 if stage > 0 else 2 / (2 + abs(stage))
-        modified = math.floor(base * mult)
-        for effect in self.effects:
-            props = self._get_effect_props(effect.id)
-            if stat in props.get("stat_modifiers", {}):
-                modified *= props["stat_modifiers"][stat]
-        return math.floor(modified)
-
+        stage = sum(c.change for c in self.aura.get_components(StatStageComponent) if c.stat == stat)
+        mod = (2 + stage) / 2 if stage >= 0 else 2 / (2 - stage)
+        val = base * mod
+        for comp in self.aura.get_components(StatusEffectComponent):
+            stat_mods = comp.properties.get("stat_modifiers")
+            if stat_mods and stat.value in stat_mods:
+                val *= stat_mods[stat.value]
+        return math.floor(max(1, val))
+    def has_usable_moves(self) -> bool:
+        return any(s.move.max_pp is None or self.get_current_pp(s.move.name) > 0 for s in self.skill_slots)
+    def has_effect(self, effect_id: str) -> bool:
+        return any(c.effect_id == effect_id for c in self.aura.get_components(StatusEffectComponent))
+    def get_effect(self, effect_id: str) -> Optional[StatusEffectComponent]:
+        return next((c for c in self.aura.get_components(StatusEffectComponent) if c.effect_id == effect_id), None)
+    def get_effects_by_category(self, category: str) -> List[StatusEffectComponent]:
+        return [c for c in self.aura.get_components(StatusEffectComponent) if c.properties.get("category") == category]
+    def take_damage(self, dmg: int, source_move: Optional[str] = None):
+        self.aura.add_component(DamageComponent(dmg, source_move=source_move))
+    def heal(self, amt: int, source_move: Optional[str] = None):
+        self.aura.add_component(HealComponent(amt, source_move=source_move))
+    def use_move(self, name: str):
+        move = self.get_move_by_name(name)
+        if move and move.max_pp is not None:
+            self.aura.add_component(PPConsumptionComponent(name, source_move=name))
+    def remove_effect(self, effect_id: str) -> bool:
+        components = [c for c in self.aura.get_components(StatusEffectComponent) if c.effect_id == effect_id]
+        if not components: return False
+        for c in components: self.aura.remove_component(c)
+        return True
     def apply_stat_change(self, stat: Stat, stages: int) -> Tuple[bool, str]:
-        current = self.stat_stages.get(stat, 0); new = max(-6, min(6, current + stages))
-        if new == current: return False, f"{self.name} 的{STAT_NAME_MAP.get(stat)}已无法再{'提升' if stages > 0 else '降低'}！"
-        self.stat_stages[stat] = new
-        msg = f"{self.name} 的{STAT_NAME_MAP.get(stat)}";
-        if abs(stages) >= 2: msg += "大幅"
-        msg += "提升了！" if stages > 0 else "降低了！"
+        current = sum(c.change for c in self.aura.get_components(StatStageComponent) if c.stat == stat)
+        new_total = max(-6, min(6, current + stages))
+        change = new_total - current
+        if change == 0:
+            return False, f"的{STAT_NAME_MAP.get(stat)}已无法再{'提升' if stages > 0 else '降低'}！"
+        self.aura.add_component(StatStageComponent(stat, change))
+        msg = f"的{STAT_NAME_MAP.get(stat)}"
+        if abs(change) >= 2: msg += "大幅"
+        msg += "提升了！" if change > 0 else "降低了！"
         return True, msg
-
     def change_crit_stage(self, stages: int) -> Tuple[bool, str]:
-        current = self.crit_rate_stage; new = max(0, min(3, current + stages))
-        if new == current: return False, f"{self.name} 的要害攻击率已无法再提升！"
-        self.crit_rate_stage = new
-        return True, f"{self.name} 更容易击中要害了！"
+        current = sum(c.change for c in self.aura.get_components(StatStageComponent) if c.stat == Stat.CRIT_RATE)
+        new_total = max(0, min(3, current + stages))
+        change = new_total - current
+        if change == 0: return False, "的要害攻击率已无法再提升！"
+        self.aura.add_component(StatStageComponent(Stat.CRIT_RATE, change))
+        return True, "更容易击中要害了！"
+    def on_switch_out(self):
+        self.aura.clear_components_by_lifespan(ComponentLifespan.VOLATILE)
+    def clear_turn_effects(self):
+        self.aura.clear_components_by_lifespan(ComponentLifespan.TEMPORARY)
+    def _remove_effect_and_log(self, effect_id: str) -> Optional[str]:
+        comp = self.get_effect(effect_id)
+        if comp:
+            self.aura.remove_component(comp)
+            return comp.properties.get("remove_log", f"的 [{comp.name}] 效果消失了。")
+        return None
+    def _get_effect_props(self, effect_id: str) -> Dict:
+        if effect_id.startswith("sequence_slot_"):
+            return {"name": "序列效果", "category": "sequence", "stacking_behavior": "refresh"}
+        return self.factory.get_effect_properties().get(effect_id, {})
+    def _calculate_stats(self, base_stats: Dict[str, int], level: int) -> Dict[Stat, int]:
+        IV, EV_TERM = 31, 0
+        stats = {Stat.HP: math.floor(((2 * base_stats["hp"] + IV + EV_TERM) * level) / 100) + level + 10}
+        stat_map = {"attack": Stat.ATTACK, "defense": Stat.DEFENSE, "special_attack": Stat.SPECIAL_ATTACK, "special_defense": Stat.SPECIAL_DEFENSE, "speed": Stat.SPEED}
+        for key, stat_enum in stat_map.items():
+            stats[stat_enum] = math.floor((((2 * base_stats[key] + IV + EV_TERM) * level) / 100) + 5)
+        return stats
+    def _initialize_moves(self, move_names: List[str], factory: 'GameDataFactory'):
+        from astrbot.api import logger
+        from copy import deepcopy
+        for i, name in enumerate(move_names):
+            template = factory.get_move_template(name)
+            if template:
+                self.skill_slots.append(SkillSlot(index=i, move=deepcopy(template)))
+            else:
+                logger.warning(f"未能为 {self.name} 加载技能 '{name}'.")
+    def get_move_by_name(self, name: str) -> Optional[Move]:
+        return next((s.move for s in self.skill_slots if s.move.name == name), None)

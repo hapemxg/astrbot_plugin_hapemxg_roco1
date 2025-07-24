@@ -1,4 +1,4 @@
-# service.py
+# service.py (已应用修改)
 import json
 from pathlib import Path
 from typing import Dict, Optional, Any, List, TYPE_CHECKING
@@ -49,22 +49,95 @@ class GameService:
         return next((p for p in battle.get_player_survivors() if p.name == target_str), None)
 
     def _handle_turn_result(self, session_id: str, session: GameSession, battle: Battle, result: Dict) -> ServiceResult:
+        """统一处理来自 battle.process_turn 的结果。"""
         turn_log = result.get('log', '')
-        session.state = result["state"]
+        session.state = result["state"] 
+        
         if result.get("is_over"):
             winner_name = "玩家" if result.get('winner') == 'Player' else 'NPC'
             winner_msg = f"🏆 **{winner_name} 获得了胜利！** 🏆"
             final_log = f"{turn_log}\n\n{winner_msg}"
             if session_id in self.sessions: del self.sessions[session_id]
             return ServiceResult(success=True, message=final_log)
-        if battle.npc_active_pokemon and battle.npc_active_pokemon.is_fainted():
-            next_npc = battle.get_next_npc_pokemon()
-            if next_npc:
-                battle.npc_active_pokemon = next_npc
-                turn_log += f"\n\n(NPC) 派出了新的宝可梦：{next_npc.name}！"
+        
         ui_body = ui.generate_regular_ui_body(session)
         final_message = ui.generate_final_message(ui_body, session, turn_log=turn_log)
         return ServiceResult(success=True, message=final_message)
+
+    def execute_switch(self, session_id: str, target_str: Optional[str]) -> ServiceResult:
+        """
+        处理所有类型的切换指令。
+        此方法现在是纯粹的委托者，根据会话状态，将请求分发给 Battle 领域对象中
+        的 `process_turn` (战术性换人) 或 `process_faint_switch` (濒死替换)。
+        """
+        session, battle = self.get_session_and_battle(session_id)
+        if not session or not battle: return ServiceResult(False, "你不在任何对战中。")
+        
+        if not target_str: return ServiceResult(True, ui.display_full_team_status(battle))
+        
+        # 【修改】即使在所有PP耗尽的情况下，也允许玩家进行切换。
+        # 此处移除了 `player.has_usable_moves()` 的检查，以确保PP耗尽时也能切换。
+        if not session.is_fighting() and not session.is_awaiting_switch():
+            return ServiceResult(False, "现在不是切换宝可梦的时候！")
+            
+        target_pokemon = self._find_target_pokemon(battle, target_str)
+        if not target_pokemon:
+            return ServiceResult(False, f"无法切换: '{target_str}' 不是一个有效的、存活的宝可梦名称或队伍编号。")
+        if target_pokemon == battle.player_active_pokemon:
+            return ServiceResult(False, "不能切换到已经在场上的宝可梦！")
+            
+        if session.is_awaiting_switch():
+            # 场景A: 濒死替换 (中断事件)
+            result_dict = battle.process_faint_switch(target_pokemon)
+            session.state = battle.state
+            
+            if not result_dict['success']:
+                return ServiceResult(False, result_dict['log'])
+
+            log = result_dict['log']
+            ui_body = ui.generate_regular_ui_body(session)
+            full_message = ui.generate_final_message(ui_body, session, turn_log=log)
+            return ServiceResult(True, full_message)
+
+        elif session.is_fighting():
+            # 场景B: 战术性换人 (标准回合行动)
+            player_action_intent = {"type": "switch", "data": target_pokemon}
+            result = battle.process_turn(player_action_intent)
+            return self._handle_turn_result(session_id, session, battle, result)
+        
+        return ServiceResult(False, "发生未知错误，无法切换宝可梦。")
+
+    def execute_attack(self, session_id: str, move_name: str) -> ServiceResult:
+        session, battle = self.get_session_and_battle(session_id)
+        if not session or not battle or not session.is_fighting(): return ServiceResult(False, "现在不是行动的时候。")
+        player = battle.player_active_pokemon
+        
+        # 【核心修改】整合了“无法行动”指令的逻辑，以支持您独特的PP耗尽机制
+        if not player.has_usable_moves():
+            # 所有技能PP耗尽时，允许用户输入“无法行动”来强制进入无法行动状态
+            if move_name.lower() == "无法行动":
+                # 用户选择强制无法行动，则生成相应的意图，这将被 battle._create_action_from_intent 识别
+                player_action_intent = {"type": "force_immobilized_turn", "data": None} 
+            else:
+                # 提示用户只能切换或强制无法行动
+                return ServiceResult(False, f"你的 {player.name} 所有技能PP都用完了！你只能选择 `/battle switch [名字/编号]` 切换宝可梦，或输入 `/attack 无法行动` 在本回合进入无法行动状态。")
+        else:
+            # 存在可用PP的技能
+            move = player.get_move_by_name(move_name)
+            if not move:
+                return ServiceResult(False, f"你的 {player.name} 不会技能 '{move_name}'！")
+            
+            # 检查特定技能的PP是否耗尽
+            if move.max_pp is not None and player.get_current_pp(move_name) <= 0:
+                return ServiceResult(False, f"技能 `{move_name}` 的PP已经用完了！")
+            
+            # 生成正常的攻击意图
+            player_action_intent = {"type": "attack", "data": move}
+
+        result = battle.process_turn(player_action_intent)
+        return self._handle_turn_result(session_id, session, battle, result)
+
+    # --- 以下为无需修改的辅助方法 ---
 
     def start_new_selection(self, session_id: str) -> ServiceResult:
         if session_id in self.sessions: return ServiceResult(False, "你已经在一个会话中了！使用 /battle flee 放弃当前对战。")
@@ -128,46 +201,3 @@ class GameService:
     def flee_battle(self, session_id: str) -> ServiceResult:
         if session_id in self.sessions: del self.sessions[session_id]; return ServiceResult(True, "你从战斗中逃跑了，对战结束！")
         return ServiceResult(False, "你当前不在任何对战中。")
-
-    def execute_attack(self, session_id: str, move_name: str) -> ServiceResult:
-        session, battle = self.get_session_and_battle(session_id)
-        if not session or not battle or not session.is_fighting(): return ServiceResult(False, "现在不是行动的时候。")
-        player = battle.player_active_pokemon
-        
-        if not player.has_usable_moves():
-            player_action_intent = {"type": "struggle"}
-        else:
-            move = player.get_move_by_name(move_name)
-            if not move:
-                return ServiceResult(False, f"你的 {player.name} 不会技能 '{move_name}'！")
-            if move.current_pp <= 0:
-                return ServiceResult(False, f"技能 `{move_name}` 的PP已经用完了！")
-            player_action_intent = {"type": "attack", "data": move}
-
-        # 【核心修复】调用 battle.py 中新的、统一的回合处理方法
-        result = battle.process_turn(player_action_intent)
-        return self._handle_turn_result(session_id, session, battle, result)
-
-    def execute_switch(self, session_id: str, target_str: Optional[str]) -> ServiceResult:
-        session, battle = self.get_session_and_battle(session_id)
-        if not session or not battle: return ServiceResult(False, "你不在任何对战中。")
-        if not session.is_fighting() and not session.is_awaiting_switch(): return ServiceResult(False, "现在不是切换宝可梦的时候！")
-        if not target_str: return ServiceResult(True, ui.display_full_team_status(battle))
-            
-        target = self._find_target_pokemon(battle, target_str)
-        if not target: return ServiceResult(False, f"无法切换: '{target_str}' 不是一个有效的、存活的宝可梦名称或队伍编号。")
-        if target == battle.player_active_pokemon: return ServiceResult(False, "不能切换到已经在场上的宝可梦！")
-            
-        if session.is_fighting():
-            # 【核心修复】将换人也视为一种“行动意图”
-            player_action_intent = {"type": "switch", "data": target}
-            result = battle.process_turn(player_action_intent)
-            return self._handle_turn_result(session_id, session, battle, result)
-        elif session.is_awaiting_switch():
-            battle.player_active_pokemon = target; session.state = BattleState.FIGHTING
-            log = f"你派出了 {target.name}！"
-            ui_body = ui.generate_regular_ui_body(session)
-            full_message = ui.generate_final_message(ui_body, session, turn_log=log)
-            return ServiceResult(True, full_message)
-        else:
-            return ServiceResult(False, "现在不是切换宝可梦的时候！")

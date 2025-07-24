@@ -1,48 +1,66 @@
-# battle_logic/effects/apply_status.py
-import random
+# battle_logic/effects/apply_status.py (最终完整版)
+
+from __future__ import annotations
 from typing import List, TYPE_CHECKING
 from .base_effect import BaseEffect
+from ..components import VolatileFlagComponent
 
-if TYPE_CHECKING: from ..pokemon import Pokemon, Move
+if TYPE_CHECKING:
+    from ..pokemon import Pokemon, Move
+    from ..battle import Battle
 
 class ApplyStatusEffect(BaseEffect):
     """
-    【重构】效果处理器，能够处理并执行衍生效果。
+    【最终版】效果处理器：施加状态效果。
+    这是一个通用的处理器，它将从JSON读取的效果ID、目标和附加选项(options)
+    完全委托给 Pokemon 对象的 apply_effect 方法进行处理。
     """
     def execute(self, attacker: 'Pokemon', defender: 'Pokemon', move: 'Move', log: List[str]):
+        """
+        执行施加状态的逻辑。
+        """
         effect_id = self.effect_data.get("status")
-        if not effect_id: return
+        if not effect_id:
+            # 如果JSON中没有定义 'status' 字段，则静默失败，不产生日志
+            return
             
-        target = defender if self.effect_data.get("target", "opponent") == "opponent" else attacker
+        # 确定效果施加的目标
+        target_str = self.effect_data.get("target", "opponent")
+        target = defender if target_str == "opponent" else attacker
         
-        penalty_info = self.effect_data.get("consecutive_use_penalty")
-        success_chance = 100.0
+        # 为日志生成正确的前缀
+        prefix = self.battle._get_pokemon_log_prefix(target)
+        
+        # --- 特殊情况处理：一次性的 VolatileFlag ---
+        # 这种标志不通过 apply_effect，而是直接添加到Aura中
+        props = self.battle.factory.get_effect_properties().get(effect_id, {})
+        if props.get("category") == "volatile_flag":
+            target.aura.add_component(VolatileFlagComponent(effect_id, source_move=move.name))
+            # 从JSON读取自定义的施加日志
+            apply_log = props.get('apply_log', f"获得了 [{props.get('name', effect_id)}] 效果！")
+            log.append(f"  {prefix}{target.name}{apply_log}")
+            return
 
-        if penalty_info:
-            history = self.battle.get_action_history_for(attacker) # 注意：这里应检查攻击者的历史
-            past_history = history[1:]
-            consecutive_count = 0
-            move_to_check = penalty_info.get("move_name")
-            for past_move in past_history:
-                if past_move.name == move_to_check:
-                    consecutive_count += 1
-                else: break
-            if consecutive_count > 0:
-                reduction = consecutive_count * penalty_info.get("reduction_per_use", 20.0)
-                success_chance = max(0, 100.0 - reduction)
+        # --- 通用逻辑：委托给 pokemon.apply_effect ---
+        # 从JSON效果定义中获取 'options' 字典
+        options = self.effect_data.get("options")
         
-        if random.uniform(0, 100) < success_chance:
-            # 【修复】接收 apply_effect 返回的三个值
-            success, message, derivative_effects = target.apply_effect(effect_id, source_move=move.name)
+        # 调用Pokemon对象的核心方法，将所有逻辑决策权交给它
+        success, message, derivative_effects = target.apply_effect(
+            effect_id=effect_id, 
+            source_move=move.name, 
+            options=options
+        )
+        
+        # 根据 apply_effect 的返回结果生成日志
+        if success:
+            # message 可能包含多行，例如替换状态时的日志
+            for line in message.split('\n'):
+                log.append(f"  {prefix}{target.name}{line.strip()}")
             
-            if success:
-                # 统一记录主效果的日志
-                prefix = self.battle._get_pokemon_log_prefix(target)
-                log.append(f"  {prefix}{target.name}{message}")
-                
-                # 【修复】如果存在衍生效果，则立即通过 battle 实例执行它们
-                if derivative_effects:
-                    # 注意：衍生效果的目标是原效果的目标(target)，但攻击者不变
-                    self.battle.execute_effect_list(derivative_effects, attacker, target, move, log)
-        elif penalty_info:
-            log.append(f"  但它失败了...")
+            # 如果存在衍生效果，则立即通过 battle 实例递归执行它们
+            if derivative_effects:
+                self.battle.execute_effect_list(derivative_effects, attacker, target, move, log)
+        else:
+            # 如果施加失败，apply_effect 返回的 message 会包含原因
+            log.append(f"  但它失败了... ({message})")

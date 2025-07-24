@@ -1,295 +1,333 @@
 # battle_logic/battle.py
+from __future__ import annotations
 import random
 import math
 from collections import deque
 from typing import List, Optional, Dict, Any, Literal, Type, Hashable
-from copy import deepcopy
 
 from .pokemon import Pokemon, Move
-from .constants import BattleState, TypeEffectiveness, EFFECT_PROPERTIES, Stat, MoveCategory
+from .constants import BattleState, TypeEffectiveness, Stat, MoveCategory
 from .factory import GameDataFactory
+from .components import VolatileFlagComponent, StatusEffectComponent, CriticalBoostComponent
+from astrbot.api import logger
 
-# 类型别名，用于清晰地表示行动意图
 Action = Dict[Literal["type", "pokemon", "data", "priority"], Any]
 
 class Battle:
-    """
-    封装了宝可梦对战的核心逻辑。
-
-    该类采用了“小回合”结算模型和“可查询历史记录”模式，以确保行动时序的精确性、
-    状态结算的原子性，以及架构的高度模块化和可扩展性。
-    """
     def __init__(self, player_team: List[Pokemon], npc_team: List[Pokemon], factory: GameDataFactory):
-        """
-        初始化一场新的战斗。
-
-        Args:
-            player_team: 玩家的宝可梦队伍列表。
-            npc_team: NPC的宝可梦队伍列表。
-            factory: 用于创建游戏数据的 GameDataFactory 实例。
-        """
         self.player_team: List[Pokemon] = player_team
         self.npc_team: List[Pokemon] = npc_team
         self.factory: GameDataFactory = factory
-        
         self.player_active_pokemon: Optional[Pokemon] = player_team[0] if player_team else None
         self.npc_active_pokemon: Optional[Pokemon] = npc_team[0] if npc_team else None
-        
         self.turn_count: int = 0
         self.state: BattleState = BattleState.FIGHTING
-        
-        # 【终极架构】一个真正的、有固定长度限制的历史记录系统。
         self.action_history: Dict[Hashable, deque] = {}
-        self.history_limit: int = 5  # 最近5回合的记录
-
-        # 动态导入效果处理器，避免循环依赖
+        self.history_limit: int = 5
         from .effects import EFFECT_HANDLER_MAP, BaseEffect
         self.effect_handler_classes: Dict[str, Type[BaseEffect]] = EFFECT_HANDLER_MAP
-        
-        # 初始化“挣扎”技能模板
-        self.struggle_move_template: Move = self._initialize_struggle_move()
 
-    def _initialize_struggle_move(self) -> Move:
-        """加载或创建“挣扎”技能的备用模板。"""
-        struggle = self.factory.get_move_template("挣扎")
-        if struggle: return struggle
-        
-        from astrbot.api import logger
-        logger.warning("未能从 moves.json 加载“挣扎”技能，将使用内置的默认版本。")
-
-        # 因为没有技能可以使用了，只能原地罚站，不会造成任何效果。
-        default_display = {"power": 0, "pp": None, "type": "一般", "category": "status"}
-        default_on_use = {
-            "priority": 0, 
-            "guaranteed_hit": True, 
-            "effects": []
-        }
-        return Move(name="挣扎", display=default_display, on_use=default_on_use)
-
-    # --- 辅助方法 ---
-    def is_over(self) -> bool:
-        return all(p.is_fainted() for p in self.player_team) or all(p.is_fainted() for p in self.npc_team)
-
-    def get_winner(self) -> Optional[str]:
-        if not self.is_over(): return None
-        return "Player" if all(p.is_fainted() for p in self.npc_team) else "NPC"
-
-    def _get_pokemon_log_prefix(self, p: Pokemon) -> str:
-        return "(玩家)" if p in self.player_team else "(NPC)"
-    
-    def get_next_npc_pokemon(self) -> Optional[Pokemon]:
-        return next((p for p in self.npc_team if not p.is_fainted()), None)
-
-    # --- 历史记录系统 ---
-    def get_action_history_for(self, pokemon: Pokemon) -> List[Move]:
-        """以列表形式，返回一个宝可梦的近期行动历史（从最近到最远）。"""
-        history_deque = self.action_history.get(id(pokemon))
-        if not history_deque: return []
-        return list(reversed(history_deque))
-
-    def _record_action(self, pokemon: Pokemon, move: Move):
-        """将一次行动记录到对应宝可梦的历史队列中。"""
-        pokemon_id = id(pokemon)
-        if pokemon_id not in self.action_history:
-            self.action_history[pokemon_id] = deque(maxlen=self.history_limit)
-        self.action_history[pokemon_id].append(move)
-
-    def _clear_history_for(self, pokemon: Pokemon):
-        """当宝可梦切换下场时，清空其历史记录。"""
-        pokemon_id = id(pokemon)
-        if pokemon_id in self.action_history:
-            del self.action_history[pokemon_id]
-
-    # --- 核心回合流程控制 ---
     def process_turn(self, player_action_intent: Dict) -> Dict[str, Any]:
-        """主回合处理方法，编排整个回合的流程。"""
-        self.turn_count += 1
-        log = [f"--- 第 {self.turn_count} 回合 ---"]
-        
+        log = []
         player, npc = self.player_active_pokemon, self.npc_active_pokemon
-        if not player or not npc:
-            return {"log": "错误：一方或双方没有宝可梦在场。", "state": BattleState.ENDED}
 
-        player_action = self._create_action_from_intent(player, player_action_intent)
-        npc_action = self._create_npc_action(npc)
-        
-        action_order = sorted([player_action, npc_action], key=lambda x: (x['priority'], x['pokemon'].get_modified_stat(Stat.SPEED)), reverse=True)
-        first_action, second_action = action_order[0], action_order[1]
+        try:
+            self.turn_count += 1
+            log.append(f"--- 第 {self.turn_count} 回合 ---")
+            if not player or not npc:
+                return self._build_turn_result(log)
 
-        if not first_action['pokemon'].is_fainted():
-            self._execute_sub_turn(first_action['pokemon'], second_action['pokemon'], first_action, log)
+            player_action = self._create_action_from_intent(player, player_action_intent)
+            npc_action = self._create_npc_action(npc)
 
-        if self.npc_active_pokemon and self.npc_active_pokemon.is_fainted() and not self.is_over():
-            next_npc = self.get_next_npc_pokemon()
-            if next_npc:
-                self.npc_active_pokemon = next_npc
-                log.append(f"(NPC) 派出了 {next_npc.name}！")
-        
-        if not second_action['pokemon'].is_fainted():
-            current_opponent = self.npc_active_pokemon if second_action['pokemon'] == self.player_active_pokemon else self.player_active_pokemon
-            if current_opponent and not current_opponent.is_fainted():
-                self._execute_sub_turn(second_action['pokemon'], current_opponent, second_action, log)
+            action_order = sorted(
+                [player_action, npc_action],
+                key=lambda x: (x['priority'], x['pokemon'].get_modified_stat(Stat.SPEED)),
+                reverse=True
+            )
 
-        if self.player_active_pokemon: self.player_active_pokemon.clear_turn_effects()
-        if self.npc_active_pokemon: self.npc_active_pokemon.clear_turn_effects()
-        
-        if self.player_active_pokemon and self.player_active_pokemon.is_fainted() and not self.is_over():
-            self.state = BattleState.AWAITING_SWITCH
+            for action in action_order:
+                actor = action['pokemon']
+                opponent = self.npc_active_pokemon if actor is self.player_active_pokemon else self.player_active_pokemon
+
+                if actor.is_fainted() or not opponent:
+                    continue
+
+                self._execute_action_core(actor, opponent, action, log)
+                if self._handle_fainting_and_state_update(log) or self.is_over(): break
+                
+                self._process_post_action_triggers(actor, log)
+                if self._handle_fainting_and_state_update(log) or self.is_over(): break
+
+                self._resolve_end_of_turn_effects(opponent, log)
+                if self._handle_fainting_and_state_update(log) or self.is_over(): break
             
-        return {"log": "\n".join(log), "state": self.state, "is_over": self.is_over(), "winner": self.get_winner()}
+            if not self.is_over() and self.state != BattleState.AWAITING_SWITCH:
+                self.state = BattleState.FIGHTING
+            
+            return self._build_turn_result(log)
 
-    def _execute_sub_turn(self, actor: Pokemon, opponent: Pokemon, action: Action, log: list):
-        """执行一个完整的小回合：行动前检查 -> 执行行动 -> 追击 -> 结算对手状态。"""
-        if not self._check_can_act(actor, log):
-            self._resolve_status_consequences(actor, log)
-            return
+        finally:
+            if player: player.clear_turn_effects()
+            if npc: npc.clear_turn_effects()
 
-        if action["type"] == "attack":
-            move_used = action["data"]
-            self._record_action(actor, move_used) # 记录到历史
-            actor.use_move(move_used.name) # 消耗PP
-            self._perform_action_attack(actor, opponent, move_used, log)
-        elif action["type"] == "switch":
-            self._perform_action_switch(actor, action["data"], log)
-        
-        current_opponent = self.npc_active_pokemon if actor == self.player_active_pokemon else self.player_active_pokemon
-        if not current_opponent or current_opponent.is_fainted(): return
-        
-        self._process_post_action_triggers(actor, current_opponent, log)
-        if current_opponent.is_fainted(): return
-
-        self._resolve_status_consequences(current_opponent, log)
-
-    def _create_action_from_intent(self, pokemon: Pokemon, intent: Dict) -> Action:
-        action_type = intent.get("type")
-        if action_type == "attack":
-            move = intent.get("data")
-            if move: return {"type": "attack", "pokemon": pokemon, "data": move, "priority": move.priority}
-        if action_type == "switch":
-            target_pokemon = intent.get("data")
-            if target_pokemon: return {"type": "switch", "pokemon": pokemon, "data": target_pokemon, "priority": 8}
-        return {"type": "attack", "pokemon": pokemon, "data": self.struggle_move_template, "priority": 0}
-
-    def _create_npc_action(self, pokemon: Pokemon) -> Action:
-        if pokemon.has_usable_moves():
-            usable_moves = [m for m in pokemon.moves.values() if m.current_pp is None or m.current_pp > 0]
-            if usable_moves:
-                move = random.choice(usable_moves)
-                return {"type": "attack", "pokemon": pokemon, "data": move, "priority": move.priority}
-        return {"type": "attack", "pokemon": pokemon, "data": self.struggle_move_template, "priority": 0}
-
-    def _check_can_act(self, pokemon: Pokemon, log: list) -> bool:
-        prefix = self._get_pokemon_log_prefix(pokemon)
-        if pokemon.has_effect("flinch"):
-            log.append(f"{prefix}{pokemon.name} 畏缩了，无法行动！"); return False
-        for effect in list(pokemon.effects):
-            props = EFFECT_PROPERTIES.get(effect.id, {})
-            if props.get("blocks_action"):
-                log.append(f"{prefix}{pokemon.name} 因 [{effect.name}] 而无法行动！"); return False
-            if effect.id == "paralysis" and random.random() < props.get("immobility_chance", 0.25):
-                log.append(f"{prefix}{pokemon.name} 全身麻痹，无法行动！"); return False
-        return True
-
-    def _resolve_status_consequences(self, pokemon: Pokemon, log: list):
-        if pokemon.is_fainted(): return
-        effects_to_remove = []
-        for effect in list(pokemon.effects):
-            props = EFFECT_PROPERTIES.get(effect.id, {})
-            if 'damage_per_turn' not in props and 'duration' not in effect.data and 'clear_chance' not in props: continue
-            if 'damage_per_turn' in props:
-                damage = max(1, math.floor(pokemon.max_hp * props["damage_per_turn"]))
-                pokemon.take_damage(damage)
-                log.append(f"  {self._get_pokemon_log_prefix(pokemon)}{pokemon.name} 因 [{effect.name}] 受到了 {damage} 点伤害！")
-                if pokemon.is_fainted(): log.append(f"  {self._get_pokemon_log_prefix(pokemon)}{pokemon.name} 倒下了！"); break 
-            if 'duration' in effect.data:
-                effect.data['duration'] -= 1
-                if effect.data['duration'] <= 0: effects_to_remove.append((effect.id, f"  {self._get_pokemon_log_prefix(pokemon)}{pokemon.name} 的 [{effect.name}] 效果结束了。"))
-            elif 'clear_chance' in props and random.random() < props['clear_chance']:
-                 effects_to_remove.append((effect.id, f"  {self._get_pokemon_log_prefix(pokemon)}{pokemon.name} 从 [{effect.name}] 中恢复了！"))
-        for effect_id, msg in effects_to_remove: pokemon.remove_effect(effect_id); log.append(msg)
-
-    def _perform_action_attack(self, attacker: Pokemon, defender: Pokemon, move: Move, log: list):
-        prefix = self._get_pokemon_log_prefix(attacker)
-        log.append(f"{prefix}{attacker.name} 使用了 {move.name}！")
-        if self._check_hit(attacker, defender, move):
-            self.execute_effect_list(move.effects, attacker, defender, move, log)
-            if defender.is_fainted(): log.append(f"  {self._get_pokemon_log_prefix(defender)}{defender.name} 倒下了！")
-        else:
-            if defender.has_effect("evasion_shield"): log.append(f"  但 {self._get_pokemon_log_prefix(defender)}{defender.name} 的闪避架势躲开了攻击！")
-            else: log.append("  但攻击落空了！")
-
-    def _perform_action_switch(self, p_out: Pokemon, p_in: Pokemon, log: list):
-        prefix = self._get_pokemon_log_prefix(p_out)
-        log.append(f"{prefix}收回了 {p_out.name}！"); p_out.on_switch_out()
-        self._clear_history_for(p_out) # 清空历史
-        if p_out in self.player_team: self.player_active_pokemon = p_in
-        else: self.npc_active_pokemon = p_in
-        log.append(f"{self._get_pokemon_log_prefix(p_in)}去吧，{p_in.name}！")
-
-    def _process_post_action_triggers(self, actor: Pokemon, opponent: Pokemon, log: list):
-        if actor.is_fainted(): return
+    def _process_post_action_triggers(self, actor: Pokemon, log: list):
         active_sequences = actor.get_effects_by_category("sequence")
         if not active_sequences: return
+
+        action_history = self.get_action_history_for(actor)
+        move_this_turn = action_history[0] if action_history else None
+
         sorted_sequences = sorted(active_sequences, key=lambda eff: eff.data.get("source_slot_index", 99))
+        
         for sequence in sorted_sequences:
-            current_opponent = self.npc_active_pokemon if actor == self.player_active_pokemon else self.player_active_pokemon
-            if not current_opponent or current_opponent.is_fainted(): break
-            if sequence.data.get("is_activation_turn"): continue
-            sequence_id = sequence.data.get("sequence_id"); charges = sequence.data.get("charges", 0)
-            if not sequence_id or charges <= 0: continue
-            steps = self.factory.get_follow_up_sequence(sequence_id)
-            if not steps: actor.remove_effect(sequence.id); continue
+            if move_this_turn and sequence.source_move == move_this_turn.name:
+                continue
             
-            # 【修复】将 UnboundLocalError 的问题代码拆分为两行，确保变量在使用前被赋值
+            opponent = self.npc_active_pokemon if actor in self.player_team else self.player_active_pokemon
+            if not opponent or opponent.is_fainted():
+                return
+
+            sequence_id, charges = sequence.data.get("sequence_id"), sequence.data.get("charges", 0)
+            if not sequence_id or charges <= 0: continue
+            
+            steps = self.factory.get_follow_up_sequence(sequence_id)
+            if not steps:
+                actor.remove_effect(sequence.effect_id); continue
+            
             total_charges = sequence.data.get("total_charges", len(steps))
             step_index = total_charges - charges
             
             if step_index < len(steps):
                 log.append(f"  由 [{sequence.source_move or '序列'}] 追击 - 第 {step_index + 1}/{total_charges} 段：")
-                self.execute_effect_list(steps[step_index], actor, current_opponent, Move("追击效果", {}, {}), log)
-                if current_opponent.is_fainted():
-                    log.append(f"  {self._get_pokemon_log_prefix(current_opponent)}{current_opponent.name} 倒下了！")
-                    # 【核心逻辑】如果追击链条中目标被击倒，应立即中止后续的追击
-                    break 
-                if charges == 1:
-                    actor.remove_effect(sequence.id)
+                move = Move(name="追击效果", display={}, on_use={})
+                
+                self.execute_effect_list(steps[step_index], actor, opponent, move, log)
+                
+                sequence.data["charges"] -= 1
+                if sequence.data["charges"] <= 0:
+                    actor.remove_effect(sequence.effect_id)
                     log.append(f"  {self._get_pokemon_log_prefix(actor)}{actor.name} 的 [{sequence.source_move}] 序列结束了。")
-                else: sequence.data["charges"] -= 1
+                
+                if opponent.is_fainted():
+                    break
 
-    def _check_hit(self, attacker: Pokemon, defender: Pokemon, move: Move) -> bool:
-        if move.guaranteed_hit: return True
-        if defender.has_effect("evasion_shield"): return False
-        accuracy = move.accuracy or 100
-        return random.randint(1, 100) <= accuracy
-    
-    def _check_critical_hit(self, a: Pokemon) -> bool: 
-        p, b, m = 0.0005, 0.0525, 1.5 if a.crit_rate_stage > 0 else 1.0
-        return random.random() < min((a.crit_points * p + b) * m, 1.0)
-    
+    def execute_effect_list(self, effect_list: List[Dict], attacker: Pokemon, defender: Pokemon, move: Move, log: list):
+        if not effect_list: return
+        for effect_data in effect_list:
+            handler_class = self.effect_handler_classes.get(effect_data.get("handler"))
+            if handler_class and random.random() <= effect_data.get("chance", 100) / 100.0:
+                handler_class(self, effect_data).execute(attacker, defender, move, log)
+
+    def _build_turn_result(self, log: List[str]) -> Dict[str, Any]:
+        return {"log": "\n".join(log), "state": self.state, "is_over": self.is_over(), "winner": self.get_winner()}
+
+    def _execute_action_core(self, actor: Pokemon, opponent: Optional[Pokemon], action: Action, log: list):
+        if action["type"] == "immobilized_turn":
+            log.append(f"{self._get_pokemon_log_prefix(actor)}{actor.name} 无法行动！")
+            return
+        if self._check_can_act(actor, log):
+            if action["type"] == "attack":
+                move_used = action["data"]
+                self._record_action(actor, move_used)
+                if move_used.max_pp is not None:
+                    actor.use_move(move_used.name)
+                self._perform_action_attack(actor, opponent, move_used, log)
+            elif action["type"] == "switch":
+                self._perform_action_switch(actor, action["data"], log)
+
+    def _handle_fainting_and_state_update(self, log: list) -> bool:
+        player_fainted = self.player_active_pokemon and self.player_active_pokemon.is_fainted()
+        npc_fainted = self.npc_active_pokemon and self.npc_active_pokemon.is_fainted()
+
+        if not player_fainted and not npc_fainted:
+            return False
+
+        if player_fainted:
+            if self.state != BattleState.AWAITING_SWITCH and self.state != BattleState.ENDED:
+                log.append(f"  {self._get_pokemon_log_prefix(self.player_active_pokemon)}{self.player_active_pokemon.name} 倒下了！")
+            
+            if self.get_player_survivors():
+                self.state = BattleState.AWAITING_SWITCH
+            else:
+                self.state = BattleState.ENDED
+            return True
+
+        if npc_fainted:
+            faint_msg = f"{self.npc_active_pokemon.name} 倒下了！"
+            if not any(faint_msg in line for line in log[-3:]):
+                 log.append(f"  {self._get_pokemon_log_prefix(self.npc_active_pokemon)}{faint_msg}")
+
+            next_npc = self.get_next_npc_pokemon()
+            if next_npc:
+                self.npc_active_pokemon = next_npc
+                log.append(f"(NPC) 派出了新的宝可梦：{next_npc.name}！")
+            else:
+                self.state = BattleState.ENDED
+            return True
+        return False
+
+    def process_faint_switch(self, new_pokemon: Pokemon) -> Dict[str, Any]:
+        if self.state != BattleState.AWAITING_SWITCH: return {"success": False, "log": "错误：当前不处于等待换人状态。"}
+        if new_pokemon.is_fainted() or new_pokemon not in self.player_team: return {"success": False, "log": "错误：选择的宝可梦无效或已倒下。"}
+        p_out = self.player_active_pokemon
+        if p_out: p_out.on_switch_out(); self._clear_history_for(p_out)
+        self.player_active_pokemon = new_pokemon; self.state = BattleState.FIGHTING
+        return {"success": True, "log": f"去吧，{new_pokemon.name}！"}
+
+    def _check_critical_hit(self, attacker: Pokemon) -> bool:
+        base_crit_chance = 0.0525 + (attacker.crit_points * 0.0005)
+        crit_multiplier = 2.0 if attacker.aura.get_components(CriticalBoostComponent) else 1.0
+        return random.random() < min(base_crit_chance * crit_multiplier, 1.0)
+
+    def _check_can_act(self, pokemon: Pokemon, log: list) -> bool:
+        prefix = self._get_pokemon_log_prefix(pokemon)
+        if any(c.flag_id == 'flinch' for c in pokemon.aura.get_components(VolatileFlagComponent)):
+            log.append(f"{prefix}{pokemon.name} 畏缩了，无法行动！"); return False
+        for effect_comp in pokemon.aura.get_components(StatusEffectComponent):
+            if effect_comp.effect_id == "paralysis":
+                if random.random() < effect_comp.properties.get("immobility_chance", 0.25):
+                    log.append(f"{prefix}{pokemon.name} 全身麻痹，无法行动！"); return False
+        return True
+
+    def _resolve_end_of_turn_effects(self, pokemon: Pokemon, log: list):
+        if pokemon.is_fainted(): return
+        for effect_comp in list(pokemon.aura.get_components(StatusEffectComponent)):
+            if pokemon.is_fainted(): break
+            # 修正：状态激活日志不应在此处生成，此处仅负责倒计时
+            if effect_comp.effect_id == "immobilized" and "delay_activation_turns" in effect_comp.data:
+                effect_comp.data["delay_activation_turns"] -= 1
+                continue # 倒计时后继续处理其他效果
+            props = effect_comp.properties
+            if 'damage_per_turn' in props:
+                damage = max(1, math.floor(pokemon.max_hp * props["damage_per_turn"]))
+                pokemon.take_damage(damage, source_move=effect_comp.name)
+                log.append(f"  {self._get_pokemon_log_prefix(pokemon)}{pokemon.name} 因 [{effect_comp.name}] 受到了 {damage} 点伤害！")
+            if 'duration' in effect_comp.data and effect_comp.data['duration'] > 0:
+                effect_comp.data['duration'] -= 1
+                if effect_comp.data['duration'] <= 0:
+                    log.append(f"  {self._get_pokemon_log_prefix(pokemon)}{pokemon.name} 的 [{effect_comp.name}] 效果结束了。")
+                    pokemon.aura.remove_component(effect_comp)
+            elif 'clear_chance' in props and random.random() < props['clear_chance']:
+                 log.append(f"  {self._get_pokemon_log_prefix(pokemon)}{pokemon.name} 从 [{effect_comp.name}] 中恢复了！")
+                 pokemon.aura.remove_component(effect_comp)
+
+    def _perform_action_attack(self, attacker: Pokemon, opponent: Optional[Pokemon], move: Move, log: list):
+        log.append(f"{self._get_pokemon_log_prefix(attacker)}{attacker.name} 使用了 {move.name}！")
+        if not opponent: log.append("  但是没有目标！"); return
+        if self._check_hit(attacker, opponent, move):
+            self.execute_effect_list(move.effects, attacker, opponent, move, log)
+        else: log.append("  但攻击落空了！")
+
+    def _perform_action_switch(self, p_out: Pokemon, p_in: Pokemon, log: list):
+        log.append(f"{self._get_pokemon_log_prefix(p_out)}收回了 {p_out.name}！"); p_out.on_switch_out(); self._clear_history_for(p_out)
+        if p_out in self.player_team: self.player_active_pokemon = p_in
+        else: self.npc_active_pokemon = p_in
+        log.append(f"{self._get_pokemon_log_prefix(p_in)}去吧，{p_in.name}！")
+
     def calculate_damage(self, attacker: Pokemon, defender: Pokemon, move: Move) -> Dict[str, Any]:
-        result = {"damage": 0, "log_msg": "", "is_crit": False}
+        result = {"damage": 0, "log_msg": "", "is_crit": False};
         if move.category == MoveCategory.STATUS: return result
-        power = move.display_power
-        effectiveness = TypeEffectiveness.get_effectiveness(move.type, defender.types)
+        effectiveness = TypeEffectiveness.get_effectiveness(move.type, defender.types, self.factory.get_type_chart())
         if effectiveness == 0:
             result["log_msg"] = f"这对 {self._get_pokemon_log_prefix(defender)}{defender.name} 没有任何效果！"; return result
-        attack_stat, defense_stat = (attacker.get_modified_stat(Stat.ATTACK), defender.get_modified_stat(Stat.DEFENSE)) if move.category == MoveCategory.PHYSICAL else (attacker.get_modified_stat(Stat.SPECIAL_ATTACK), defender.get_modified_stat(Stat.SPECIAL_DEFENSE))
-        damage = (((2 * attacker.level / 5 + 2) * power * attack_stat / defense_stat) / 50) + 2
-        if self._check_critical_hit(attacker):
-            damage *= 2.0; result["is_crit"] = True; result["log_msg"] += "击中了要害！"
+        attack_stat = attacker.get_modified_stat(Stat.ATTACK if move.category == MoveCategory.PHYSICAL else Stat.SPECIAL_ATTACK)
+        defense_stat = defender.get_modified_stat(Stat.DEFENSE if move.category == MoveCategory.PHYSICAL else Stat.SPECIAL_DEFENSE)
+        damage = (((2 * attacker.level / 5 + 2) * move.display_power * attack_stat / defense_stat) / 50) + 2
+        if self._check_critical_hit(attacker): damage *= 2.0; result["is_crit"] = True; result["log_msg"] += "击中了要害！"
         damage *= random.uniform(0.85, 1.0)
         if move.type in attacker.types: damage *= 1.5
         damage *= effectiveness
         if effectiveness > 1: result["log_msg"] += " 效果绝佳！"
         elif effectiveness < 1: result["log_msg"] += " 效果不理想..."
-        result["damage"], result["log_msg"] = math.floor(max(1, damage)), result["log_msg"].strip()
+        result["damage"] = math.floor(max(1, damage)); result["log_msg"] = result["log_msg"].strip()
         return result
+
+
+    def _check_hit(self, attacker: Pokemon, defender: Pokemon, move: Move) -> bool:
+        """
+        根据精确的优先级顺序，判断技能是否命中。
+        优先级顺序:
+        1. 必中技能判定 (最高优先级)
+        2. 闪避状态判定
+        3. 基础命中率判定 (最低优先级)
+        """
+        # 规则 1: 检查技能是否为“必中技能”。如果是，则无视一切条件，直接命中。
+        if move.guaranteed_hit:
+            return True
+
+        # 规则 2: 检查防御方是否处于“闪避状态”。如果是，则无视命中率，直接落空。
+        # (此检查仅在技能不是必中技能时才会执行)
+        for effect in defender.aura.get_components(StatusEffectComponent):
+            if effect.properties.get("guaranteed_evasion"):
+                return False
+
+        # 规则 3: 如果以上条件都不满足，则根据技能的基础命中率进行随机判定。
+        # (accuracy 为 None 或 100 时，等同于必定命中)
+        if move.accuracy is None:
+            return True
+        return random.randint(1, 100) <= move.accuracy
+
+
+    def _create_action_from_intent(self, pokemon: Pokemon, intent: Dict) -> Action:
+        # 在回合开始创建意图时，最优先检查是否处于无法行动状态。
+        immobilized = pokemon.get_effect("immobilized")
+        if immobilized and immobilized.data.get("delay_activation_turns", 0) <= 0:
+            return {"type": "immobilized_turn", "pokemon": pokemon, "data": None, "priority": 8}
+            
+        if intent.get("type") == "force_immobilized_turn":
+            return {"type": "immobilized_turn", "pokemon": pokemon, "data": None, "priority": 8}
+
+        if not pokemon.has_usable_moves() and intent.get("type") != "switch":
+            return {"type": "immobilized_turn", "pokemon": pokemon, "data": None, "priority": 8}
+            
+        action_type = intent.get("type")
+        if action_type == "attack":
+            move = intent.get("data");
+            if move: return {"type": "attack", "pokemon": pokemon, "data": move, "priority": move.priority}
+        elif action_type == "switch":
+            target = intent.get("data");
+            if target: return {"type": "switch", "pokemon": pokemon, "data": target, "priority": 8}
+            
+        logger.warning(f"宝可梦 {pokemon.name} 收到无效行动意图 ({intent.get('type')})，强制进入无法行动。")
+        return {"type": "immobilized_turn", "pokemon": pokemon, "data": None, "priority": 8}
+
+    def _create_npc_action(self, pokemon: Pokemon) -> Action:
+        # 在回合开始创建意图时，最优先检查是否处于无法行动状态。
+        immobilized = pokemon.get_effect("immobilized")
+        if immobilized and immobilized.data.get("delay_activation_turns", 0) <= 0:
+            return {"type": "immobilized_turn", "pokemon": pokemon, "data": None, "priority": 8}
+
+        if not pokemon.has_usable_moves():
+            return {"type": "immobilized_turn", "pokemon": pokemon, "data": None, "priority": 8}
+            
+        usable = [s.move for s in pokemon.skill_slots if s.move.max_pp is None or pokemon.get_current_pp(s.move.name) > 0]
+        if usable:
+            move = random.choice(usable)
+            return {"type": "attack", "pokemon": pokemon, "data": move, "priority": move.priority}
+            
+        logger.error(f"NPC宝可梦 {pokemon.name} 逻辑错误：未能选择技能，强制进入无法行动。")
+        return {"type": "immobilized_turn", "pokemon": pokemon, "data": None, "priority": 8}
     
-    def execute_effect_list(self, effect_list: List[Dict], attacker: Pokemon, defender: Pokemon, move: Move, log: list):
-        if not effect_list or defender.is_fainted(): return
-        for effect_data in effect_list:
-            handler_class = self.effect_handler_classes.get(effect_data.get("handler"))
-            if handler_class and random.randint(1, 100) <= effect_data.get("chance", 100): 
-                effect_instance = handler_class(self, effect_data)
-                effect_instance.execute(attacker, defender, move, log)
-                if defender.is_fainted(): break
+    def is_over(self) -> bool: return all(p.is_fainted() for p in self.player_team) or all(p.is_fainted() for p in self.npc_team)
+
+    def get_winner(self) -> Optional[str]:
+        if not self.is_over(): return None
+        return "Player" if all(p.is_fainted() for p in self.npc_team) else "NPC"
+
+    def _get_pokemon_log_prefix(self, p: Pokemon) -> str: return "(玩家)" if p in self.player_team else "(NPC)"
+
+    def get_player_survivors(self) -> List[Pokemon]: return [p for p in self.player_team if not p.is_fainted()]
+
+    def get_next_npc_pokemon(self) -> Optional[Pokemon]: return next((p for p in self.npc_team if not p.is_fainted()), None)
+
+    def get_action_history_for(self, pokemon: Pokemon) -> List[Move]: return list(reversed(self.action_history.get(id(pokemon), deque())))
+
+    def _record_action(self, pokemon: Pokemon, move: Move):
+        pid = id(pokemon)
+        if move and move.name != "追击效果":
+            if pid not in self.action_history: self.action_history[pid] = deque(maxlen=self.history_limit)
+            self.action_history[pid].append(move)
+
+    def _clear_history_for(self, pokemon: Pokemon):
+        if id(pokemon) in self.action_history: del self.action_history[id(pokemon)]
