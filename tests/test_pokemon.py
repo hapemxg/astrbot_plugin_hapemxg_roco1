@@ -1,4 +1,4 @@
-# tests/test_pokemon.py (已修复)
+# tests/test_pokemon.py
 import pytest
 from pathlib import Path
 from astrbot_plugin_hapemxg_roco1.battle_logic.factory import GameDataFactory

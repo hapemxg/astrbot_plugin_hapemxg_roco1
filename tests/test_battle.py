@@ -10,6 +10,7 @@ from astrbot_plugin_hapemxg_roco1.battle_logic.factory import GameDataFactory
 from astrbot_plugin_hapemxg_roco1.battle_logic.constants import Stat
 from astrbot_plugin_hapemxg_roco1.battle_logic.data_models import MoveDataModel, EffectModel
 from astrbot_plugin_hapemxg_roco1.battle_logic.components import StatusEffectComponent, VolatileFlagComponent, HealComponent, DamageComponent
+from astrbot_plugin_hapemxg_roco1.battle_logic.components import StatStageComponent
 
 # --- Fixture 和辅助函数 (保持不变) ---
 @pytest.fixture(scope="function")
@@ -75,6 +76,7 @@ async def test_scenario_2_poison_damage_at_end_of_mini_turn(game_factory: GameDa
 
 @pytest.mark.asyncio
 async def test_scenario_3_status_replacement_and_derivative_effect(game_factory: GameDataFactory):
+    # Arrange
     player_team = [game_factory.create_pokemon("测试精灵4", 100, move_names=["龙威"])]
     npc_team = [game_factory.create_pokemon("测试精灵2", 100, move_names=["巨焰吞噬"])]
     player_team[0].stats[Stat.SPEED] = 100
@@ -82,18 +84,23 @@ async def test_scenario_3_status_replacement_and_derivative_effect(game_factory:
     battle = Battle(player_team, npc_team, game_factory)
     npc = battle.npc_active_pokemon
     
-    npc.apply_effect("paralysis")
-    assert npc.has_effect("paralysis")
+    # Pre-condition: 先给NPC施加一个B类状态（麻醉）
+    npc.apply_effect("anesthesia")
+    assert npc.has_effect("anesthesia"), "测试前置条件失败：未能成功施加麻醉状态"
 
+    # Act: 玩家使用“龙威”，此技能会施加B类状态“恐惧”
     log1 = battle.process_turn({"type": "attack", "data": battle.player_active_pokemon.get_move_by_name("龙威")})["log"]
     
-    assert npc.has_effect("fear")
-    assert not npc.has_effect("paralysis")
+    # Assert
+    # 1. 验证最终状态：
+    assert npc.has_effect("fear"), "断言失败：NPC最终应处于恐惧状态"
+    assert not npc.has_effect("anesthesia"), "断言失败：麻醉状态应已被恐惧正确顶替"
+    
+    # 2. 验证过程日志：
     assert_log_contains(log1, [
-        "的 [麻痹] 状态解除了。",
-        "陷入了 [恐惧]！",
-        "畏缩了！",
-        "畏缩了，无法行动！"
+        "的 [麻醉] 状态解除了。", # 期望日志1: 系统应播报旧状态被解除。这是 apply_effect 顶替逻辑的一部分。
+        "陷入了 [恐惧]！",      # 期望日志2: 系统应播报新状态已施加。
+        "因 [恐惧] 而无法行动！" # 期望日志3: 在NPC自己的小回合开始前，_check_can_act会检查恐惧状态，并因on_clear_fail施加畏缩，最终导致此日志。
     ])
 
 @pytest.mark.asyncio
@@ -138,6 +145,7 @@ async def test_scenario_5_sequence_execution_order_and_initial_hit(game_factory:
 
 @pytest.mark.asyncio
 async def test_scenario_6_pp_consumption_logic(game_factory: GameDataFactory, monkeypatch):
+    # Part A (无变化)
     player_A = game_factory.create_pokemon("测试精灵", 100, move_names=["猛烈撞击"])
     npc_A = game_factory.create_pokemon("测试精灵2", 100, move_names=["巨焰吞噬"])
     battle_A = Battle([player_A], [npc_A], game_factory)
@@ -145,17 +153,26 @@ async def test_scenario_6_pp_consumption_logic(game_factory: GameDataFactory, mo
     battle_A.process_turn({"type": "attack", "data": player_A.get_move_by_name("猛烈撞击")})
     assert npc_A.get_current_pp("巨焰吞噬") == initial_pp_A - 1
 
+    # Part B
     player_B = game_factory.create_pokemon("测试精灵", 100, move_names=["猛烈撞击"])
     npc_B = game_factory.create_pokemon("测试精灵2", 100, move_names=["巨焰吞噬"])
     battle_B = Battle([player_B], [npc_B], game_factory)
-    npc_B.apply_effect("paralysis")
+    
+    # 【核心修正】使用我们最终确认的、有效的状态ID "anesthesia"
+    npc_B.apply_effect("anesthesia")
     initial_pp_B = npc_B.get_current_pp("巨焰吞噬")
     
-    monkeypatch.setattr(random, "random", lambda: 0.01)
+    # 通过monkeypatch强制触发麻痹的“无法行动”效果
+    monkeypatch.setattr(random, "random", lambda: 0.01) # 确保 random() < 0.5
     
     log = battle_B.process_turn({"type": "attack", "data": player_B.get_move_by_name("猛烈撞击")})["log"]
     
-    assert_log_contains(log, ["全身麻痹，无法行动！"])
+    # Assert
+    # 1. 验证日志：
+    # 期望日志: 在NPC行动前，_check_can_act 会检查麻醉状态，并根据 immobility_chance 判定无法行动。
+    assert_log_contains(log, ["因 [麻醉] 而全身麻痹，无法行动！"])
+    # 2. 验证PP：
+    # 期望结果: 因为行动被 _check_can_act 阻止，后续的 _execute_action_core 不会执行，因此不会有PP消耗。
     assert npc_B.get_current_pp("巨焰吞噬") == initial_pp_B
 
 @pytest.mark.asyncio
@@ -226,48 +243,44 @@ async def test_scenario_8_sequence_chain_is_interrupted_on_kill(game_factory: Ga
 
 
 @pytest.mark.asyncio
-async def test_scenario_9_immobilized_delayed_effect_prevents_action(game_factory: GameDataFactory):
-    """
-    【最终重构版】验证一个核心行为：
-    延迟生效的"无法行动"状态，是否能在下一回合正确地阻止目标行动。
-    """
-    # --- Arrange: 准备测试数据和环境 ---
-    # 定义一个带有延迟生效“无法行动”效果的技能
-    game_factory._effects_db["immobilized"] = {
-        "name": "无法行动", "category": "status", "status_type": "immobilization", "is_volatile": True,
-        "apply_log": "陷入了 [无法行动] 状态！\n  (将从下一回合开始无法行动!)"
-    }
+async def test_scenario_9_immobilized_is_decoupled_from_flinch(game_factory: GameDataFactory):
+    # Arrange: 准备一个施加纯粹“无法行动”的技能
     immobilize_move_data = {
         "禁锢之光": {
             "display": {"power": 0, "pp": 10, "type": "电", "category": "status"},
-            "on_use": { "priority": 8, "effects": [{"handler": "apply_status", "status": "immobilized", "options": {"delay_activation_turns": 1}}] }
+            "on_use": { "effects": [{"handler": "apply_status", "status": "immobilized"}] }
         }
     }
     game_factory._move_db["禁锢之光"] = MoveDataModel.model_validate(immobilize_move_data["禁锢之光"])
+    # 确保 immobilize 效果存在
+    game_factory._effects_db["immobilized"] = {
+        "name": "无法行动", "category": "status", "status_type": "immobilization", "is_volatile": True,
+        "apply_log": "陷入了 [无法行动] 状态！(效果将在下回合生效)"
+    }
 
-    # 创建宝可梦和战斗实例
     player_team = [game_factory.create_pokemon("测试精灵3", 100, move_names=["禁锢之光"])]
     npc_team = [game_factory.create_pokemon("测试精灵", 100, move_names=["猛烈撞击"])]
-    player_team[0].stats[Stat.SPEED] = 100 # 确保玩家先手
+    player_team[0].stats[Stat.SPEED] = 100 # 玩家先手
     npc_team[0].stats[Stat.SPEED] = 50
     battle = Battle(player_team, npc_team, game_factory)
     player, npc = battle.player_active_pokemon, battle.npc_active_pokemon
 
     # --- Act & Assert: 第一回合 ---
-    # 玩家使用“禁锢之光”，NPC获得延迟的“无法行动”效果
     log1 = battle.process_turn({"type": "attack", "data": player.get_move_by_name("禁锢之光")})["log"]
     
-    # 验证：在这一回合，NPC仍然可以行动，因为效果尚未激活
-    assert npc.has_effect("immobilized"), "NPC 应已获得'无法行动'效果"
-    assert npc.get_effect("immobilized").data.get("delay_activation_turns") == 0, "延迟计数器应在回合结束时归零"
+    # 1. 验证状态和日志
+    assert npc.has_effect("immobilized"), "断言失败：NPC应已获得'无法行动'效果"
+    assert_log_contains(log1, ["陷入了 [无法行动] 状态！"])
+    
+    # 2. 验证当回合行为
+    # 期望结果: 因为“无法行动”和“畏缩”已彻底解耦，纯粹的“无法行动”效果不应阻止当回合的后手行动。
     assert_log_contains(log1, ["(NPC)测试精灵 使用了 猛烈撞击！"])
 
     # --- Act & Assert: 第二回合 ---
-    # 玩家再次行动
     log2 = battle.process_turn({"type": "attack", "data": player.get_move_by_name("禁锢之光")})["log"]
 
-    # 核心验证：在这一回合，NPC 必须“无法行动”
-    # 我们验证日志中【不包含】NPC成功行动的记录，但【包含】NPC无法行动的记录
+    # 3. 验证下一回合行为
+    # 期望结果: 在新回合开始时，battle._create_action_from_intent 会检查到NPC身上有一个“非新获得”的“无法行动”状态，从而阻止其行动。
     assert_log_contains(log2, ["(NPC)测试精灵 无法行动！"])
     assert_log_not_contains(log2, ["(NPC)测试精灵 使用了 猛烈撞击！"])
 
@@ -301,3 +314,120 @@ async def test_scenario_10_pp_depleted_forces_immobilized_turn(game_factory: Gam
     
     npc_action = battle._create_npc_action(npc)
     assert npc_action["type"] == "immobilized_turn"
+    
+@pytest.mark.asyncio
+async def test_shengjie_purge_and_reset_works(game_factory: GameDataFactory):
+    """测试“圣洁”能否正确净化异常状态和重置负面能力。"""
+    # Arrange
+    player = game_factory.create_pokemon("测试精灵", 100, move_names=["圣洁"])
+    npc = game_factory.create_pokemon("测试精灵2", 100, move_names=["金属噪音"]) # 金属噪音降特防
+    battle = Battle([player], [npc], game_factory)
+
+    # 1. 先给玩家施加中毒和负面能力
+    player.apply_effect("poison")
+    player.aura.add_component(StatStageComponent(Stat.ATTACK, -2))
+    assert player.has_effect("poison"), "前置条件失败：未能施加中毒"
+    total_attack_stage = sum(c.change for c in player.aura.get_components(StatStageComponent) if c.stat == Stat.ATTACK)
+    assert total_attack_stage == -2, "前置条件失败：未能施加负面能力"
+
+    # Act
+    log = battle.process_turn({"type": "attack", "data": player.get_move_by_name("圣洁")})["log"]
+
+    # Assert
+    assert not player.has_effect("poison"), "断言失败：“圣洁”未能净化中毒状态"
+    total_attack_stage_after = sum(c.change for c in player.aura.get_components(StatStageComponent) if c.stat == Stat.ATTACK)
+    assert total_attack_stage_after == 0, "断言失败：“圣洁”未能重置负面能力"
+    
+    assert_log_contains(log, [
+        "身上的所有异常状态都被净化了！",
+        "被削弱的能力 (攻击) 恢复到了正常水平！",
+        "被圣洁的光芒笼罩，获得了闪避能力！"
+    ])
+
+@pytest.mark.asyncio
+async def test_shengjie_initial_evasion_works(game_factory: GameDataFactory):
+    """测试“圣洁”第一回合获得的闪避状态能否生效。"""
+    # Arrange
+    player = game_factory.create_pokemon("测试精灵", 100, move_names=["圣洁"])
+    npc = game_factory.create_pokemon("测试精灵2", 100, move_names=["猛烈撞击"])
+    # 确保NPC后手，以便在下一回合攻击
+    player.stats[Stat.SPEED] = 100
+    npc.stats[Stat.SPEED] = 50
+    battle = Battle([player], [npc], game_factory)
+
+    # Act (Turn 1): 玩家使用圣洁
+    battle.process_turn({"type": "attack", "data": player.get_move_by_name("圣洁")})
+    assert player.has_effect("shengjie_evasion")
+
+    # Act (Turn 2): NPC攻击
+    log = battle.process_turn({"type": "attack", "data": player.get_move_by_name("圣洁")})["log"]
+    
+    # Assert: NPC的攻击应该落空
+    assert_log_contains(log, ["(NPC)测试精灵2 使用了 猛烈撞击！", "但攻击落空了！"])
+    assert_log_not_contains(log, ["造成了"])
+
+@pytest.mark.asyncio
+async def test_shengjie_sequence_removes_evasion(game_factory: GameDataFactory):
+    """测试“圣洁”在正常情况下，第二回合追击能否移除闪避。"""
+    # Arrange
+    player = game_factory.create_pokemon("测试精灵", 100, move_names=["圣洁", "猛烈撞击"])
+    npc = game_factory.create_pokemon("测试精灵2", 100, move_names=["猛烈撞击"])
+    battle = Battle([player], [npc], game_factory)
+
+    # Act (Turn 1): 玩家使用圣洁
+    battle.process_turn({"type": "attack", "data": player.get_move_by_name("圣洁")})
+    assert player.has_effect("shengjie_evasion")
+
+    # Act (Turn 2): 玩家使用其他技能，触发追击
+    log = battle.process_turn({"type": "attack", "data": player.get_move_by_name("猛烈撞击")})["log"]
+    
+    # Assert
+    assert_log_contains(log, ["由 [圣洁] 追击", "的圣洁光芒消散了。"])
+    assert not player.has_effect("shengjie_evasion"), "断言失败：第二回合追击后，圣洁闪避应被移除"
+
+@pytest.mark.asyncio
+async def test_shengjie_kill_preserves_evasion_for_next_turn(game_factory: GameDataFactory):
+    """【核心战术测试】验证通过击杀中断回合，能否保留闪避状态到下一回合，并闪避优先技能。"""
+    # --- Arrange ---
+    player = game_factory.create_pokemon("测试精灵", 100, move_names=["圣洁", "星之雨", "魔法增效"])
+    # 准备一个会被击杀的NPC和它的替补
+    npc_to_be_killed = game_factory.create_pokemon("测试精灵2", 100)
+    npc_replacement = game_factory.create_pokemon("测试精灵3", 100, move_names=["速度打击"]) # 替补带有优先技能
+    
+    battle = Battle([player], [npc_to_be_killed, npc_replacement], game_factory)
+    
+    # 确保玩家能一击必杀
+    npc_to_be_killed.take_damage(npc_to_be_killed.max_hp - 1)
+    assert npc_to_be_killed.current_hp == 1, "前置条件失败：未能将NPC血量设为1"
+    
+    # 确保NPC的替补速度更快，但玩家的技能有更高优先级
+    player.stats[Stat.SPEED] = 100
+    npc_replacement.stats[Stat.SPEED] = 200
+
+    # --- Turn 1: 玩家使用“圣洁” ---
+    log1 = battle.process_turn({"type": "attack", "data": player.get_move_by_name("圣洁")})["log"]
+    assert player.has_effect("shengjie_evasion"), "第一回合失败：未能获得圣洁闪避"
+    assert_log_contains(log1, ["获得了闪避能力"])
+    
+    # --- Turn 2: 玩家使用“星之雨”击杀NPC ---
+    log2 = battle.process_turn({"type": "attack", "data": player.get_move_by_name("星之雨")})["log"]
+    
+    # 验证回合是否被正确中断
+    assert npc_to_be_killed.is_fainted(), "第二回合失败：未能击杀NPC"
+    assert battle.npc_active_pokemon is npc_replacement, "第二回合失败：NPC替补未能上场"
+    assert_log_contains(log2, ["(NPC)测试精灵2 倒下了！", "(NPC) 派出了新的宝可梦：测试精灵3！"])
+    
+    # 核心断言：验证追击效果未触发，闪避状态被保留
+    assert_log_not_contains(log2, ["由 [圣洁] 追击"])
+    assert player.has_effect("shengjie_evasion"), "核心断言失败：击杀后，圣洁闪避状态应被保留！"
+
+    # --- Turn 3: 对方替补先手攻击，我方后手增效 ---
+    log3 = battle.process_turn({"type": "attack", "data": player.get_move_by_name("魔法增效")})["log"]
+    
+    # 最终断言：验证NPC的优先攻击是否因闪避而落空
+    assert_log_contains(log3, [
+        "(NPC)测试精灵3 使用了 速度打击！", # 对方先手
+        "但攻击落空了！",             # 攻击落空
+        "(玩家)测试精灵 使用了 魔法增效！"  # 我方后手成功
+    ])
+    assert_log_not_contains(log3, ["对 (玩家)测试精灵 造成了"])

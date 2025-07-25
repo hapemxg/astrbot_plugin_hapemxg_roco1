@@ -7,7 +7,6 @@ from astrbot_plugin_hapemxg_roco1.battle_logic.battle import Battle
 from astrbot_plugin_hapemxg_roco1.battle_logic.pokemon import Pokemon
 from astrbot_plugin_hapemxg_roco1.battle_logic.factory import GameDataFactory
 from astrbot_plugin_hapemxg_roco1.battle_logic.move import Move
-from astrbot_plugin_hapemxg_roco1.battle_logic.data_models import MoveDataModel
 
 # --- Fixture 和辅助函数 (保持不变) ---
 @pytest.fixture(scope="function")
@@ -35,17 +34,17 @@ async def test_hit_evasion_priority_logic(game_factory: GameDataFactory):
     - 场景B: 100%命中率技能 (accuracy: 100) vs 闪避状态 -> 结果：必定闪避
     """
     # --- Arrange: 准备测试环境 ---
-
     game_factory._effects_db["evasion_shield"] = {
         "name": "闪避架势", "category": "marker", "is_temporary": True,
         "guaranteed_evasion": True, "apply_log": "摆出了闪避的架势！"
     }
 
-    attacker = game_factory.create_pokemon("测试精灵", 100)
-    defender = game_factory.create_pokemon("测试精灵2", 100)
+    attacker_template = game_factory.create_pokemon("测试精灵", 100)
+    defender_template = game_factory.create_pokemon("测试精灵2", 100)
     
-    # 【关键修复】让 NPC "失忆"，使其在本回合无法行动，防止日志污染
-    defender.skill_slots = []
+    # 【关键修复】让 NPC 模板 "失忆"，使其在战斗中无法行动，从而防止其行动日志污染测试结果。
+    # 这是确保测试隔离性的重要步骤。
+    defender_template.skill_slots = []
 
     guaranteed_hit_move = Move(
         name="锁定打击",
@@ -57,37 +56,27 @@ async def test_hit_evasion_priority_logic(game_factory: GameDataFactory):
         display={"power": 60, "pp": 20, "type": "一般", "category": "special"},
         on_use={"accuracy": 100, "guaranteed_hit": False, "effects": [{"handler": "deal_damage", "options": {"power": 60}}]}
     )
-    # 【修复】为动态创建的技能添加伤害效果，否则 "造成了" 永远不会出现
-    guaranteed_hit_move.effects = [{"handler": "deal_damage", "options": {"power": 60}}]
-    normal_hit_move.effects = [{"handler": "deal_damage", "options": {"power": 60}}]
-
 
     # --- 场景 A: 必中技能 vs 闪避状态 ---
-    print("\n--- 开始场景 A: 必中技能 vs 闪避状态 ---")
-    
-    battle_a = Battle([deepcopy(attacker)], [deepcopy(defender)], game_factory)
+    battle_a = Battle([deepcopy(attacker_template)], [deepcopy(defender_template)], game_factory)
     defender_a = battle_a.npc_active_pokemon
     defender_a.apply_effect("evasion_shield")
-    assert defender_a.get_effect("evasion_shield") is not None, "场景A准备失败: 未能施加闪避状态"
+    assert defender_a.has_effect("evasion_shield"), "场景A准备失败: 未能施加闪避状态"
 
     log_a = battle_a.process_turn({"type": "attack", "data": guaranteed_hit_move})["log"]
     
     assert_log_contains(log_a, "使用了 锁定打击！")
     assert_log_contains(log_a, "造成了")
     assert_log_not_contains(log_a, "但攻击落空了！")
-    print("--- 场景 A 测试通过 ---")
 
     # --- 场景 B: 100%命中率技能 vs 闪避状态 ---
-    print("\n--- 开始场景 B: 100%命中率技能 vs 闪避状态 ---")
-    
-    battle_b = Battle([deepcopy(attacker)], [deepcopy(defender)], game_factory)
+    battle_b = Battle([deepcopy(attacker_template)], [deepcopy(defender_template)], game_factory)
     defender_b = battle_b.npc_active_pokemon
     defender_b.apply_effect("evasion_shield")
-    assert defender_b.get_effect("evasion_shield") is not None, "场景B准备失败: 未能施加闪避状态"
+    assert defender_b.has_effect("evasion_shield"), "场景B准备失败: 未能施加闪避状态"
     
     log_b = battle_b.process_turn({"type": "attack", "data": normal_hit_move})["log"]
     
     assert_log_contains(log_b, "使用了 精准光束！")
     assert_log_contains(log_b, "但攻击落空了！")
     assert_log_not_contains(log_b, "造成了")
-    print("--- 场景 B 测试通过 ---")

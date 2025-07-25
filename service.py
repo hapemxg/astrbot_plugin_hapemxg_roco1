@@ -1,4 +1,4 @@
-# service.py (已应用修改)
+# service.py
 import json
 from pathlib import Path
 from typing import Dict, Optional, Any, List, TYPE_CHECKING
@@ -112,7 +112,6 @@ class GameService:
         if not session or not battle or not session.is_fighting(): return ServiceResult(False, "现在不是行动的时候。")
         player = battle.player_active_pokemon
         
-        # 【核心修改】整合了“无法行动”指令的逻辑，以支持您独特的PP耗尽机制
         if not player.has_usable_moves():
             # 所有技能PP耗尽时，允许用户输入“无法行动”来强制进入无法行动状态
             if move_name.lower() == "无法行动":
@@ -137,7 +136,6 @@ class GameService:
         result = battle.process_turn(player_action_intent)
         return self._handle_turn_result(session_id, session, battle, result)
 
-    # --- 以下为无需修改的辅助方法 ---
 
     def start_new_selection(self, session_id: str) -> ServiceResult:
         if session_id in self.sessions: return ServiceResult(False, "你已经在一个会话中了！使用 /battle flee 放弃当前对战。")

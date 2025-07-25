@@ -2,7 +2,7 @@
 
 from .aura import AuraComponent, ComponentLifespan
 from .constants import Stat
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 class StatusEffectComponent(AuraComponent):
     """组件：代表一个持续的异常状态或临时效果。"""
@@ -62,3 +62,18 @@ class CriticalBoostComponent(AuraComponent):
     def __init__(self, **kwargs):
         # 【最终修正】暴击提升效果是永久的，使用基类默认的 PERMANENT 生命周期。
         super().__init__(**kwargs)
+        
+class StatusImmunityComponent(AuraComponent):
+    """
+    【升级版】组件：代表对一组特定异常状态的免疫力。
+    """
+    def __init__(self, immunity_id: str, immune_to: List[str], **kwargs):
+        """
+        Args:
+            immunity_id (str): 此免疫效果的唯一标识符，用于查找和移除。
+            immune_to (List[str]): 一个包含免疫的异常状态effect_id的列表。
+        """
+        super().__init__(**kwargs)
+        # 【核心修改】添加 immunity_id 属性
+        self.immunity_id = immunity_id
+        self.immune_to = immune_to

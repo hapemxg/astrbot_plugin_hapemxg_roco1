@@ -122,12 +122,24 @@ class GameDataFactory:
             一个 Pokemon 对象实例，或在找不到数据时返回 None。
         """
         pokemon_data_model = self.get_pokemon_data(name)
-        if not pokemon_data_model: return None
-        if move_names is None: move_names = pokemon_data_model.default_moves
+        if not pokemon_data_model:
+            return None
+            
+        if move_names is None:
+            move_names = pokemon_data_model.default_moves
+            
         base_stats_data = pokemon_data_model.base_stats.model_dump()
         
-        # 关键一步：将工厂自身 (self) 注入到 Pokemon 实例中，使其可以访问游戏数据。
-        return Pokemon(name=name, level=level, types=pokemon_data_model.types, stats=base_stats_data, move_names=move_names, factory=self)
+        # 关键一步：将工厂自身 (self) 和天生免疫 (innate_immunities) 注入到 Pokemon 实例中。
+        return Pokemon(
+            name=name,
+            level=level,
+            types=pokemon_data_model.types,
+            stats=base_stats_data,
+            move_names=move_names,
+            factory=self,
+            innate_immunities=pokemon_data_model.innate_immunities
+        )
 
     def get_follow_up_sequence(self, sequence_id: str) -> Optional[List[List[Dict[str, Any]]]]:
         """获取一个追击序列的具体效果步骤。"""
