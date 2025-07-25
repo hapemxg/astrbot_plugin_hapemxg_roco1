@@ -57,3 +57,5 @@ class PokemonDataModel(BaseModel):
     base_stats: BaseStatsModel
     default_moves: List[str]
     extra_moves: List[str] = Field(default_factory=list)
+    # 【新增】添加一个可选的天生免疫列表
+    innate_immunities: Optional[List[str]] = None

@@ -2,18 +2,23 @@
     "flinch": {
         "name": "畏缩",
         "category": "volatile_flag",
-        "is_volatile": true,
+        "is_temporary": true, 
         "stacking_behavior": "refresh",
-        "blocks_action": true,
         "apply_log": "畏缩了！"
+    },
+    "reversal_stance": {
+        "name": "斗转星移架势",
+        "category": "volatile_flag",
+        "is_temporary": true,
+        "stacking_behavior": "refresh",
+        "apply_log": "摆出了反弹攻击的架势！"
     },
     "evasion_shield": {
         "name": "闪避架势",
         "category": "marker",
-        "is_volatile": true,
+        "is_temporary": true,
         "stacking_behavior": "refresh",
-        "guaranteed_evasion": true,
-        "lifespan": "turn"
+        "guaranteed_evasion": true
     },
     "immobilized": {
         "name": "无法行动",
@@ -24,5 +29,28 @@
         "blocks_action": true,
         "duration": -1,
         "description": "宝可梦无法采取主动行动。此效果在施加后的下一回合激活。"
+    },
+    "shengjie_evasion": {
+        "name": "圣洁闪避",
+        "category": "marker",
+        "status_type": "D", 
+        "is_volatile": false,
+        "stacking_behavior": "ignore",
+        "guaranteed_evasion": true,
+        "apply_log": "被圣洁的光芒笼罩，获得了闪避能力！",
+        "remove_log": "的圣洁光芒消散了。"
+    },
+    "guardian_force_immunity": {
+        "name": "守护之力",
+        "category": "marker",
+        "is_volatile": true,
+        "stacking_behavior": "ignore",
+        "apply_log": "被守护之力笼罩着！",
+        "remove_log": "的守护之力消失了。",
+        "grants_immunity_to": [
+            "poison", "toxic", "curse", "leech_seed", "burn_new", 
+            "anesthesia", "sleep", "freeze", "fear", "confusion", 
+            "befuddle", "bind"
+        ]
     }
 }

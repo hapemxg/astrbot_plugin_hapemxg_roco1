@@ -1,11 +1,90 @@
 {
-    "poison":    {"name": "中毒", "category": "status", "status_type": "A", "is_volatile": false, "stacking_behavior": "ignore", "damage_per_turn": 0.125, "apply_log": "陷入了 [中毒] 状态！", "remove_log": "的 [中毒] 状态解除了。"},
-    "curse":     {"name": "诅咒", "category": "status", "status_type": "A", "is_volatile": true,  "stacking_behavior": "ignore", "damage_per_turn": 0.25, "apply_log": "被种下了 [诅咒]！", "remove_log": "的 [诅咒] 解除了。"},
-    "burn":      {"name": "灼伤", "category": "status", "status_type": "B", "is_volatile": false, "stacking_behavior": "ignore", "damage_per_turn": 0.0625, "stat_modifiers": {"attack": 0.5}, "apply_log": "陷入了 [灼伤] 状态！", "remove_log": "的 [灼伤] 治愈了。"},
-    "paralysis": {"name": "麻痹", "category": "status", "status_type": "B", "is_volatile": false, "stacking_behavior": "ignore", "stat_modifiers": {"speed": 0.5}, "immobility_chance": 0.25, "apply_log": "陷入了 [麻痹] 状态！", "remove_log": "的 [麻痹] 状态解除了。"},
-    "sleep":     {"name": "睡眠", "category": "status", "status_type": "B", "is_volatile": false, "stacking_behavior": "ignore", "max_duration": 3, "blocks_action": true, "apply_log": "睡着了！", "remove_log": "醒来了！"},
-    "freeze":    {"name": "冰冻", "category": "status", "status_type": "B", "is_volatile": false, "stacking_behavior": "ignore", "clear_chance": 0.2, "blocks_action": true, "apply_log": "被 [冰冻] 了！", "remove_log": "的冰块融化了！"},
-    "confusion": {"name": "混乱", "category": "status", "status_type": "B", "is_volatile": true,  "stacking_behavior": "ignore", "max_duration": 4, "self_hit_chance": 0.33, "apply_log": "陷入了 [混乱] 状态！", "remove_log": "恢复了正常！"},
-    "fear":      {"name": "恐惧", "category": "status", "status_type": "B", "is_volatile": true,  "stacking_behavior": "ignore", "on_apply_effects": [{"handler": "apply_status", "status": "flinch", "chance": 100}], "apply_log": "陷入了 [恐惧]！", "remove_log": "不再恐惧了。"},
-    "bind":      {"name": "束缚", "category": "status", "status_type": "C", "is_volatile": true,  "stacking_behavior": "ignore", "damage_per_turn": 0.125, "blocks_switch": true, "max_duration": 5, "apply_log": "被 [束缚] 住了！", "remove_log": "挣脱了束缚！"}
+    "// A类异常状态 (中毒, 剧毒, 诅咒, 寄生) - 互相顶替": {},
+    "poison":    {
+        "name": "中毒", "category": "status", "status_type": "A", "is_volatile": false, "stacking_behavior": "ignore", 
+        "damage_per_turn": 0.125, 
+        "apply_log": "陷入了 [中毒] 状态！", "remove_log": "的 [中毒] 状态解除了。"
+    },
+    "toxic":     {
+        "name": "剧毒", "category": "status", "status_type": "A", "is_volatile": false, "stacking_behavior": "ignore", 
+        "ramping_damage": true, 
+        "apply_log": "中了剧毒！", "remove_log": "的剧毒解除了。"
+    },
+    "curse":     {
+        "name": "诅咒", "category": "status", "status_type": "A", "is_volatile": true,  "stacking_behavior": "ignore", 
+        "damage_per_turn": 0.25, 
+        "apply_log": "被种下了 [诅咒]！", "remove_log": "的 [诅咒] 解除了。"
+    },
+    "leech_seed": {
+        "name": "寄生种子", "category": "status", "status_type": "A", "is_volatile": true,  "stacking_behavior": "ignore",
+        "damage_per_turn": 0.125, "heals_opponent": true,
+        "duration": 8, 
+        "apply_log": "被种上了寄生种子！", "remove_log": "摆脱了寄生种子！"
+    },
+    
+    "// B类异常状态 (烧伤, 麻醉, 催眠, 冰冻, 恐惧, 混乱, 迷惑) - 互相顶替": {},
+    "burn_new":  {
+        "name": "烧伤", "category": "status", "status_type": "B", "is_volatile": false, "stacking_behavior": "ignore",
+        "damage_per_turn": 0.125,
+        "on_apply_effects": [{"handler": "stat_change", "target": "self", "changes": [{"stat": "attack", "change": -2}]}],
+        "apply_log": "陷入了 [烧伤] 状态！", "remove_log": "的 [烧伤] 治愈了。"
+    },
+    "anesthesia": {
+        "name": "麻醉", "category": "status", "status_type": "B", "is_volatile": false, "stacking_behavior": "ignore",
+        "immobility_chance": 0.5,
+        "on_apply_effects": [{"handler": "stat_change", "target": "self", "changes": [{"stat": "speed", "change": -1}]}],
+        "apply_log": "陷入了 [麻醉] 状态！", "remove_log": "的 [麻醉] 状态解除了。"
+    },
+    "sleep": {
+        "name": "催眠", "category": "status", "status_type": "B", "is_volatile": false, "stacking_behavior": "ignore",
+        "on_pre_action_check": {
+            "blocks_action": true,
+            "duration": 4,
+            "clear_chances": {"subsequent_turns": 0.40},
+            "on_clear_fail": [{"handler": "apply_status", "status": "flinch"}]
+        },
+        "apply_log": "陷入了 [催眠] 状态！", "remove_log": "从催眠中醒来了。"
+    },
+    "freeze": {
+        "name": "冰冻", "category": "status", "status_type": "B", "is_volatile": false, "stacking_behavior": "ignore",
+        "on_apply_effects": [{"handler": "apply_status", "status": "flinch"}],
+        "on_pre_action_check": {
+            "blocks_action": true,
+            "clear_chances": {"first_turn": 0.125, "subsequent_turns": 0.10},
+            "on_clear_success": [{"handler": "remove_status", "status": "flinch", "target": "self"}]
+        },
+        "apply_log": "被 [冰冻] 了！", "remove_log": "的冰块融化了！"
+    },
+    "fear": {
+        "name": "恐惧", "category": "status", "status_type": "B", "is_volatile": true, "stacking_behavior": "ignore",
+        "on_pre_action_check": {
+            "blocks_action": true, 
+            "duration": 4,
+            "clear_chances": {"subsequent_turns": 0.40},
+            "on_clear_fail": [{"handler": "apply_status", "status": "flinch"}]
+        },
+        "apply_log": "陷入了 [恐惧]！", "remove_log": "不再恐惧了。"
+    },
+    "confusion": {
+        "name": "混乱", "category": "status", "status_type": "B", "is_volatile": true, "stacking_behavior": "ignore",
+        "on_pre_action_check": {
+            "duration": 4,
+            "clear_chances": {"subsequent_turns": 0.50} 
+        },
+        "apply_log": "陷入了 [混乱] 状态！", "remove_log": "恢复了正常！"
+    },
+    "befuddle": {
+        "name": "迷惑", "category": "status", "status_type": "B", "is_volatile": true, "stacking_behavior": "ignore",
+        "immobility_chance": 0.5,
+        "apply_log": "陷入了 [迷惑] 状态！", "remove_log": "恢复了正常！"
+    },
+
+    "// C类异常状态 (束缚) - 独立，不与其他状态顶替": {},
+    "bind":      {
+        "name": "束缚", "category": "status", "status_type": "C", "is_volatile": true, "stacking_behavior": "ignore", 
+        "damage_per_turn": 0.125, 
+        "blocks_switch": true, 
+        "duration": 5, 
+        "apply_log": "被 [束缚] 住了！", "remove_log": "挣脱了束缚！"
+    }
 }

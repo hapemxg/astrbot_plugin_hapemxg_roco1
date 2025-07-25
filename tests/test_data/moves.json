@@ -382,5 +382,82 @@
             "priority": 8, "accuracy": 100,
             "effects": []
         }
+    },
+    "守护之力": {
+        "display": {
+            "power": 0, "pp": 5, "type": "一般", "category": "status",
+            "description": "发动守护之力，连续5回合发动。首回合自身免疫异常，后续3回合维持此状态，第五回合解除。"
+        },
+        "on_use": {
+            "priority": 12, "accuracy": 100, "guaranteed_hit": true,
+            "effects": [
+                {
+                    "handler": "apply_status",
+                    "target": "self",
+                    "status": "guardian_force_immunity"
+                },
+                {
+                    "handler": "start_sequence",
+                    "sequence_id": "GuardianForce_Sequence",
+                    "initial_charges": 4
+                }
+            ]
+        },
+        "on_follow_up": {
+            "GuardianForce_Sequence": [
+                [],
+                [],
+                [],
+                [
+                    {
+                        "handler": "remove_status",
+                        "target": "self",
+                        "status": "guardian_force_immunity"
+                    }
+                ]
+            ]
+        }
+    },
+        "圣洁": {
+        "display": {
+            "power": 0, "pp": 5, "type": "一般", "category": "status",
+            "description": "连续两回合发动。首回合净化自身，获得闪避。次回合解除闪避。"
+        },
+        "on_use": {
+            "priority": 10,
+            "accuracy": 100,
+            "guaranteed_hit": true,
+            "effects": [
+                {
+                    "handler": "purge_all_status",
+                    "target": "self"
+                },
+                {
+                    "handler": "reset_negative_stats",
+                    "target": "self"
+                },
+                {
+                    "handler": "apply_status",
+                    "target": "self",
+                    "status": "shengjie_evasion"
+                },
+                {
+                    "handler": "start_sequence",
+                    "sequence_id": "ShengJie_End",
+                    "initial_charges": 1
+                }
+            ]
+        },
+        "on_follow_up": {
+            "ShengJie_End": [
+                [
+                    {
+                        "handler": "remove_status",
+                        "target": "self",
+                        "status": "shengjie_evasion"
+                    }
+                ]
+            ]
+        }
     }
 }
